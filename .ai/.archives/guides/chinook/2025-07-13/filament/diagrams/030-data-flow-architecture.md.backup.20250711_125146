@@ -1,0 +1,392 @@
+# Data Flow Architecture Diagrams
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Request-Response Flow](#request-response-flow)
+- [Data Processing Pipeline](#data-processing-pipeline)
+- [Authentication & Authorization Flow](#authentication--authorization-flow)
+- [Category Management Flow](#category-management-flow)
+- [Media Processing Flow](#media-processing-flow)
+- [Performance Optimization Flow](#performance-optimization-flow)
+
+## Overview
+
+This document provides comprehensive data flow architecture diagrams for the Chinook Filament 4 admin panel using Mermaid v10.6+ with WCAG 2.1 AA compliant color palette.
+
+**Accessibility Note:** All diagrams use high-contrast colors meeting WCAG 2.1 AA standards: #1976d2 (blue), #388e3c (green), #f57c00 (orange), #d32f2f (red). Each diagram includes descriptive titles and semantic structure for screen reader compatibility.
+
+## Request-Response Flow
+
+### HTTP Request Processing
+
+```mermaid
+---
+title: Chinook Admin Panel - HTTP Request Processing Flow
+---
+flowchart TD
+    A[User Request] --> B[Nginx Web Server]
+    B --> C[SSL Termination]
+    C --> D[Load Balancer]
+    D --> E[PHP-FPM Process]
+    
+    E --> F[Laravel Router]
+    F --> G{Route Type}
+    
+    G -->|Admin Panel| H[Filament Middleware Stack]
+    G -->|API| I[API Middleware Stack]
+    G -->|Web| J[Web Middleware Stack]
+    
+    H --> K[Authentication Check]
+    K --> L{User Authenticated?}
+    L -->|No| M[Redirect to Login]
+    L -->|Yes| N[Authorization Check]
+    
+    N --> O{User Authorized?}
+    O -->|No| P[403 Forbidden]
+    O -->|Yes| Q[Filament Panel Router]
+    
+    Q --> R{Resource Type}
+    R -->|List| S[Table Component]
+    R -->|Create/Edit| T[Form Component]
+    R -->|View| U[Infolist Component]
+    
+    S --> V[Database Query]
+    T --> W[Validation & Save]
+    U --> X[Model Loading]
+    
+    V --> Y[Response Generation]
+    W --> Y
+    X --> Y
+    
+    Y --> Z[HTTP Response]
+    
+    style A fill:#1976d2,color:#fff
+    style H fill:#388e3c,color:#fff
+    style V fill:#f57c00,color:#fff
+    style Z fill:#d32f2f,color:#fff
+```
+
+### Livewire Component Lifecycle
+
+```mermaid
+---
+title: Livewire Component Data Flow in Filament
+---
+sequenceDiagram
+    participant U as User
+    participant B as Browser
+    participant L as Livewire
+    participant F as Filament Component
+    participant M as Model
+    participant D as Database
+    
+    U->>B: User Interaction
+    B->>L: AJAX Request
+    L->>F: Component Method Call
+    
+    F->>F: Validate Input
+    F->>M: Model Operation
+    M->>D: Database Query
+    D-->>M: Query Result
+    M-->>F: Model Response
+    
+    F->>F: Update Component State
+    F-->>L: Component Response
+    L-->>B: DOM Updates
+    B-->>U: UI Update
+    
+    Note over F,M: Authorization checks<br/>happen at each step
+    Note over L,F: State synchronization<br/>maintains consistency
+```
+
+## Data Processing Pipeline
+
+### CRUD Operations Flow
+
+```mermaid
+---
+title: Filament CRUD Operations Data Pipeline
+---
+graph TB
+    subgraph "User Interface Layer"
+        A[Form Input]
+        B[Table Actions]
+        C[Bulk Operations]
+    end
+    
+    subgraph "Filament Component Layer"
+        D[Form Component]
+        E[Table Component]
+        F[Action Component]
+    end
+    
+    subgraph "Validation Layer"
+        G[Form Validation]
+        H[Business Rules]
+        I[Authorization Policies]
+    end
+    
+    subgraph "Model Layer"
+        J[Eloquent Models]
+        K[Model Observers]
+        L[Model Events]
+    end
+    
+    subgraph "Database Layer"
+        M[Query Builder]
+        N[Database Transactions]
+        O[SQLite Database]
+    end
+    
+    subgraph "Audit & Logging"
+        P[Activity Log]
+        Q[User Stamps]
+        R[Soft Deletes]
+    end
+    
+    A --> D
+    B --> E
+    C --> F
+    
+    D --> G
+    E --> H
+    F --> I
+    
+    G --> J
+    H --> J
+    I --> J
+    
+    J --> K
+    K --> L
+    L --> M
+    
+    M --> N
+    N --> O
+    
+    K --> P
+    L --> Q
+    J --> R
+    
+    style A fill:#1976d2,color:#fff
+    style G fill:#388e3c,color:#fff
+    style J fill:#f57c00,color:#fff
+    style O fill:#d32f2f,color:#fff
+```
+
+## Authentication & Authorization Flow
+
+### RBAC Permission Check Flow
+
+```mermaid
+---
+title: Role-Based Access Control Flow
+---
+flowchart TD
+    A[User Request] --> B[Authentication Check]
+    B --> C{User Logged In?}
+    C -->|No| D[Redirect to Login]
+    C -->|Yes| E[Load User Roles]
+    
+    E --> F[Load Role Permissions]
+    F --> G[Resource Permission Check]
+    G --> H{Has Permission?}
+    
+    H -->|No| I[403 Forbidden]
+    H -->|Yes| J[Model Policy Check]
+    
+    J --> K{Policy Allows?}
+    K -->|No| L[403 Forbidden]
+    K -->|Yes| M[Execute Action]
+    
+    M --> N[Log Activity]
+    N --> O[Return Response]
+    
+    subgraph "Permission Hierarchy"
+        P[Super Admin]
+        Q[Admin]
+        R[Manager]
+        S[Editor]
+        T[User]
+        
+        P --> Q
+        Q --> R
+        R --> S
+        S --> T
+    end
+    
+    style A fill:#1976d2,color:#fff
+    style E fill:#388e3c,color:#fff
+    style M fill:#f57c00,color:#fff
+    style O fill:#d32f2f,color:#fff
+```
+
+## Category Management Flow
+
+### Hybrid Hierarchical Category Processing
+
+```mermaid
+---
+title: Category Management Data Flow
+---
+graph TB
+    subgraph "Category Input"
+        A[Category Form]
+        B[Parent Selection]
+        C[Metadata Input]
+    end
+    
+    subgraph "Validation Layer"
+        D[Category Validation]
+        E[Hierarchy Validation]
+        F[Duplicate Check]
+    end
+    
+    subgraph "Processing Layer"
+        G[Adjacency List Update]
+        H[Closure Table Update]
+        I[Cache Invalidation]
+    end
+    
+    subgraph "Storage Layer"
+        J[Categories Table]
+        K[Category Closure Table]
+        L[Categorizable Pivot]
+    end
+    
+    subgraph "Performance Layer"
+        M[Query Cache]
+        N[Hierarchy Cache]
+        O[Search Index]
+    end
+    
+    A --> D
+    B --> E
+    C --> F
+    
+    D --> G
+    E --> H
+    F --> I
+    
+    G --> J
+    H --> K
+    I --> L
+    
+    J --> M
+    K --> N
+    L --> O
+    
+    style A fill:#1976d2,color:#fff
+    style D fill:#388e3c,color:#fff
+    style G fill:#f57c00,color:#fff
+    style J fill:#d32f2f,color:#fff
+```
+
+## Media Processing Flow
+
+### File Upload and Processing Pipeline
+
+```mermaid
+---
+title: Media Library Processing Flow
+---
+sequenceDiagram
+    participant U as User
+    participant F as Filament Form
+    participant V as Validation
+    participant S as Storage
+    participant P as Processing
+    participant D as Database
+    participant C as Cache
+    
+    U->>F: Upload File
+    F->>V: Validate File
+    V->>V: Check Size/Type/Security
+    
+    alt Validation Passes
+        V->>S: Store Original File
+        S->>P: Queue Processing Job
+        P->>P: Generate Thumbnails
+        P->>P: Extract Metadata
+        P->>D: Save Media Record
+        D->>C: Cache Media Info
+        C-->>F: Success Response
+        F-->>U: Upload Complete
+    else Validation Fails
+        V-->>F: Validation Error
+        F-->>U: Error Message
+    end
+    
+    Note over P: Background processing<br/>for large files
+    Note over C: CDN integration<br/>for performance
+```
+
+## Performance Optimization Flow
+
+This diagram illustrates the performance optimization strategies implemented throughout the Chinook system to ensure optimal response times and resource utilization.
+
+```mermaid
+flowchart TD
+    R[Request] --> C{Cache Check}
+    C -->|Hit| CR[Cache Response]
+    C -->|Miss| Q[Query Database]
+
+    Q --> I{Index Available?}
+    I -->|Yes| FQ[Fast Query]
+    I -->|No| SQ[Slow Query]
+
+    FQ --> E[Eager Loading]
+    SQ --> E
+    E --> P{Pagination Needed?}
+    P -->|Yes| PG[Paginate Results]
+    P -->|No| FR[Full Results]
+
+    PG --> CC[Cache Results]
+    FR --> CC
+    CC --> R2[Response]
+
+    %% Background optimization
+    Q --> BG[Background Jobs]
+    BG --> WU[Warm Up Cache]
+    BG --> IO[Index Optimization]
+    BG --> AS[Analytics Storage]
+
+    %% Performance monitoring
+    R2 --> M[Monitor Performance]
+    M --> A{Alert Threshold?}
+    A -->|Exceeded| AL[Alert System]
+    A -->|Normal| L[Log Metrics]
+
+    %% Styling with WCAG 2.1 AA compliant colors
+    classDef primary fill:#1976d2,stroke:#1976d2,stroke-width:2px,color:#ffffff
+    classDef success fill:#388e3c,stroke:#388e3c,stroke-width:2px,color:#ffffff
+    classDef warning fill:#f57c00,stroke:#f57c00,stroke-width:2px,color:#ffffff
+    classDef error fill:#d32f2f,stroke:#d32f2f,stroke-width:2px,color:#ffffff
+
+    class R,R2 primary
+    class CR,FQ,CC success
+    class SQ,AL warning
+    class C,I,P,A error
+```
+
+### Key Performance Optimizations
+
+1. **Multi-Level Caching**
+   - Redis for session and query caching
+   - Application-level caching for frequently accessed data
+   - CDN integration for static assets
+
+2. **Database Optimization**
+   - Strategic indexing on frequently queried columns
+   - Query optimization with eager loading
+   - Connection pooling and query monitoring
+
+3. **Background Processing**
+   - Queue-based processing for heavy operations
+   - Cache warming strategies
+   - Automated index optimization
+
+4. **Monitoring and Alerting**
+   - Real-time performance monitoring
+   - Automated alerting for performance degradation
+   - Comprehensive logging and analytics

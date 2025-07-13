@@ -1,0 +1,24 @@
+{
+  "metadata": {
+    "timestamp": "2025-07-08T13:05:12.672142",
+    "total_files": 0,
+    "total_links": 0,
+    "broken_links": 0,
+    "success_rate": 0,
+    "critical_files_status": {
+      "000-chinook-index.md": -1,
+      "050-chinook-advanced-features-guide.md": -1,
+      "060-chinook-media-library-guide.md": -1,
+      "070-chinook-hierarchy-comparison-guide.md": -1,
+      "filament/setup/000-index.md": -1,
+      "filament/resources/000-index.md": -1,
+      "packages/000-packages-index.md": -1,
+      "testing/000-testing-index.md": -1
+    },
+    "new_issues": [],
+    "resolved_issues": [],
+    "status": "PASS",
+    "execution_time": 0.00869297981262207
+  },
+  "detailed_results": {}
+}

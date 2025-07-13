@@ -1,0 +1,19 @@
+{
+    "watch": [
+        "app",
+        "tests",
+        "config",
+        "database/migrations"
+    ],
+    "ignore": [
+        "vendor",
+        "node_modules",
+        "storage",
+        "bootstrap/cache"
+    ],
+    "commands": [
+        "pest --parallel --coverage",
+        "phpstan analyse",
+        "php-cs-fixer fix --dry-run"
+    ]
+}

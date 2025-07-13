@@ -1,0 +1,1025 @@
+# Performance Optimization Guide
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Database Optimization](#database-optimization)
+- [Query Optimization](#query-optimization)
+- [Caching Strategies](#caching-strategies)
+- [Eager Loading Patterns](#eager-loading-patterns)
+- [Index Optimization](#index-optimization)
+- [Memory Management](#memory-management)
+- [Monitoring and Profiling](#monitoring-and-profiling)
+- [Testing Performance](#testing-performance)
+- [Best Practices](#best-practices)
+- [Navigation](#navigation)
+
+## Overview
+
+This guide covers comprehensive performance optimization techniques for Laravel 12 models in the Chinook application. The focus is on database optimization, query efficiency, caching strategies, and memory management for high-performance applications.
+
+**🚀 Key Features:**
+- **Database Optimization**: Index strategies and query optimization
+- **Caching Systems**: Multi-layer caching with Redis and application-level caching
+- **Memory Management**: Efficient memory usage patterns
+- **Query Optimization**: N+1 prevention and bulk operations
+- **WCAG 2.1 AA Compliance**: Performance considerations for accessibility
+
+## Database Optimization
+
+### Database Configuration
+
+```php
+<?php
+// config/database.php - Optimized SQLite configuration
+
+'sqlite' => [
+    'driver' => 'sqlite',
+    'url' => env('DATABASE_URL'),
+    'database' => env('DB_DATABASE', database_path('database.sqlite')),
+    'prefix' => '',
+    'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
+    'journal_mode' => 'WAL', // Write-Ahead Logging for better concurrency
+    'synchronous' => 'NORMAL', // Balance between safety and performance
+    'cache_size' => 10000, // Increase cache size
+    'temp_store' => 'MEMORY', // Store temporary tables in memory
+    'mmap_size' => 268435456, // 256MB memory-mapped I/O
+],
+```
+
+### Database Schema Optimization
+
+```php
+<?php
+// database/migrations/optimize_chinook_schema.php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        // Optimize Artists table
+        Schema::table('artists', function (Blueprint $table) {
+            $table->index(['is_active', 'created_at'], 'idx_artists_active_created');
+            $table->index(['public_id', 'is_active'], 'idx_artists_public_active');
+            $table->index('slug', 'idx_artists_slug');
+        });
+
+        // Optimize Albums table
+        Schema::table('albums', function (Blueprint $table) {
+            $table->index(['artist_id', 'release_date'], 'idx_albums_artist_release');
+            $table->index(['is_active', 'release_date'], 'idx_albums_active_release');
+            $table->index('public_id', 'idx_albums_public');
+        });
+
+        // Optimize Tracks table
+        Schema::table('tracks', function (Blueprint $table) {
+            $table->index(['album_id', 'track_number'], 'idx_tracks_album_number');
+            $table->index(['duration_ms', 'is_active'], 'idx_tracks_duration_active');
+            $table->index('public_id', 'idx_tracks_public');
+        });
+
+        // Optimize Categories table
+        Schema::table('categories', function (Blueprint $table) {
+            $table->index(['type', 'is_active', 'parent_id'], 'idx_categories_type_active_parent');
+            $table->index(['parent_id', 'sort_order'], 'idx_categories_parent_sort');
+        });
+
+        // Optimize Categorizables pivot table
+        Schema::table('categorizables', function (Blueprint $table) {
+            $table->index(['categorizable_type', 'categorizable_id'], 'idx_categorizables_morph');
+            $table->index(['category_type', 'is_primary'], 'idx_categorizables_type_primary');
+            $table->index(['category_id', 'category_type'], 'idx_categorizables_category_type');
+        });
+
+        // SQLite-specific optimizations
+        if (DB::getDriverName() === 'sqlite') {
+            DB::statement('PRAGMA optimize');
+            DB::statement('PRAGMA analysis_limit=1000');
+            DB::statement('PRAGMA cache_size=10000');
+        }
+    }
+
+    public function down(): void
+    {
+        // Drop indexes in reverse order
+        Schema::table('categorizables', function (Blueprint $table) {
+            $table->dropIndex('idx_categorizables_category_type');
+            $table->dropIndex('idx_categorizables_type_primary');
+            $table->dropIndex('idx_categorizables_morph');
+        });
+
+        Schema::table('categories', function (Blueprint $table) {
+            $table->dropIndex('idx_categories_parent_sort');
+            $table->dropIndex('idx_categories_type_active_parent');
+        });
+
+        Schema::table('tracks', function (Blueprint $table) {
+            $table->dropIndex('idx_tracks_public');
+            $table->dropIndex('idx_tracks_duration_active');
+            $table->dropIndex('idx_tracks_album_number');
+        });
+
+        Schema::table('albums', function (Blueprint $table) {
+            $table->dropIndex('idx_albums_public');
+            $table->dropIndex('idx_albums_active_release');
+            $table->dropIndex('idx_albums_artist_release');
+        });
+
+        Schema::table('artists', function (Blueprint $table) {
+            $table->dropIndex('idx_artists_slug');
+            $table->dropIndex('idx_artists_public_active');
+            $table->dropIndex('idx_artists_active_created');
+        });
+    }
+};
+```
+
+## Query Optimization
+
+### Optimized Query Builder
+
+```php
+<?php
+// app/Services/OptimizedQueryService.php
+
+namespace App\Services;
+
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\DB;
+
+class OptimizedQueryService
+{
+    /**
+     * Optimized artist query with relationships
+     */
+    public function getArtistsWithAlbums(int $limit = 50): Collection
+    {
+        return DB::table('artists')
+            ->select([
+                'artists.id',
+                'artists.name',
+                'artists.public_id',
+                'artists.slug',
+                DB::raw('COUNT(albums.id) as albums_count'),
+                DB::raw('MAX(albums.release_date) as latest_release')
+            ])
+            ->leftJoin('albums', 'artists.id', '=', 'albums.artist_id')
+            ->where('artists.is_active', true)
+            ->groupBy('artists.id', 'artists.name', 'artists.public_id', 'artists.slug')
+            ->orderByDesc('latest_release')
+            ->limit($limit)
+            ->get();
+    }
+
+    /**
+     * Optimized category assignment query
+     */
+    public function getModelsWithCategories(string $modelType, array $categoryTypes = []): Collection
+    {
+        $query = DB::table('categorizables')
+            ->select([
+                'categorizable_id',
+                'categorizable_type',
+                DB::raw('GROUP_CONCAT(categories.name) as category_names'),
+                DB::raw('GROUP_CONCAT(categories.type) as category_types')
+            ])
+            ->join('categories', 'categorizables.category_id', '=', 'categories.id')
+            ->where('categorizable_type', $modelType)
+            ->where('categories.is_active', true);
+
+        if (!empty($categoryTypes)) {
+            $query->whereIn('category_type', $categoryTypes);
+        }
+
+        return $query->groupBy('categorizable_id', 'categorizable_type')->get();
+    }
+
+    /**
+     * Bulk update with optimized queries
+     */
+    public function bulkUpdateModels(string $table, array $updates): int
+    {
+        $updated = 0;
+        
+        // Group updates by common values to reduce queries
+        $groupedUpdates = collect($updates)->groupBy(function ($update) {
+            return md5(serialize(array_except($update, ['id'])));
+        });
+
+        foreach ($groupedUpdates as $group) {
+            $ids = $group->pluck('id')->toArray();
+            $updateData = array_except($group->first(), ['id']);
+            
+            $updated += DB::table($table)
+                ->whereIn('id', $ids)
+                ->update($updateData);
+        }
+
+        return $updated;
+    }
+
+    /**
+     * Optimized search with full-text search
+     */
+    public function searchModels(string $table, string $searchTerm, array $columns = ['name']): Collection
+    {
+        // Use full-text search if available
+        if (DB::getDriverName() === 'sqlite') {
+            return DB::table($table)
+                ->whereRaw("({$table}.name LIKE ? OR {$table}.description LIKE ?)", [
+                    "%{$searchTerm}%",
+                    "%{$searchTerm}%"
+                ])
+                ->orderByRaw("
+                    CASE 
+                        WHEN {$table}.name LIKE ? THEN 1
+                        WHEN {$table}.name LIKE ? THEN 2
+                        ELSE 3
+                    END
+                ", [
+                    "{$searchTerm}%",
+                    "%{$searchTerm}%"
+                ])
+                ->limit(100)
+                ->get();
+        }
+
+        // Fallback for other databases
+        return DB::table($table)
+            ->where(function ($query) use ($columns, $searchTerm) {
+                foreach ($columns as $column) {
+                    $query->orWhere($column, 'LIKE', "%{$searchTerm}%");
+                }
+            })
+            ->limit(100)
+            ->get();
+    }
+}
+```
+
+## Caching Strategies
+
+### Multi-Layer Caching System
+
+```php
+<?php
+// app/Services/CachingService.php
+
+namespace App\Services;
+
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Redis;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Collection;
+
+class CachingService
+{
+    protected int $defaultTtl = 3600; // 1 hour
+    protected int $longTtl = 86400; // 24 hours
+    protected int $shortTtl = 300; // 5 minutes
+
+    /**
+     * Cache model with automatic invalidation
+     */
+    public function cacheModel(Model $model, int $ttl = null): Model
+    {
+        $cacheKey = $this->getModelCacheKey($model);
+        $ttl = $ttl ?? $this->defaultTtl;
+
+        Cache::put($cacheKey, $model, $ttl);
+        
+        // Add to invalidation set
+        $this->addToInvalidationSet($model::class, $model->id);
+
+        return $model;
+    }
+
+    /**
+     * Get cached model
+     */
+    public function getCachedModel(string $modelClass, int $id): ?Model
+    {
+        $cacheKey = $this->getModelCacheKey($modelClass, $id);
+        return Cache::get($cacheKey);
+    }
+
+    /**
+     * Cache collection with pagination info
+     */
+    public function cacheCollection(
+        string $key, 
+        Collection $collection, 
+        array $metadata = [],
+        int $ttl = null
+    ): array {
+        $ttl = $ttl ?? $this->defaultTtl;
+        
+        $cacheData = [
+            'data' => $collection,
+            'metadata' => $metadata,
+            'cached_at' => now(),
+        ];
+
+        Cache::put($key, $cacheData, $ttl);
+        return $cacheData;
+    }
+
+    /**
+     * Get cached collection
+     */
+    public function getCachedCollection(string $key): ?array
+    {
+        return Cache::get($key);
+    }
+
+    /**
+     * Cache query results with tags
+     */
+    public function cacheQuery(string $key, callable $callback, array $tags = [], int $ttl = null): mixed
+    {
+        $ttl = $ttl ?? $this->defaultTtl;
+
+        if (empty($tags)) {
+            return Cache::remember($key, $ttl, $callback);
+        }
+
+        return Cache::tags($tags)->remember($key, $ttl, $callback);
+    }
+
+    /**
+     * Invalidate cache by tags
+     */
+    public function invalidateByTags(array $tags): void
+    {
+        Cache::tags($tags)->flush();
+    }
+
+    /**
+     * Invalidate model cache
+     */
+    public function invalidateModel(Model $model): void
+    {
+        $cacheKey = $this->getModelCacheKey($model);
+        Cache::forget($cacheKey);
+        
+        // Remove from invalidation set
+        $this->removeFromInvalidationSet($model::class, $model->id);
+        
+        // Invalidate related caches
+        $this->invalidateRelatedCaches($model);
+    }
+
+    /**
+     * Warm up cache for frequently accessed data
+     */
+    public function warmUpCache(): void
+    {
+        // Cache popular artists
+        $this->cacheQuery('popular_artists', function () {
+            return Artist::with(['albums', 'categories'])
+                ->where('is_active', true)
+                ->orderByDesc('popularity_score')
+                ->limit(50)
+                ->get();
+        }, ['artists', 'popular'], $this->longTtl);
+
+        // Cache category trees
+        foreach (CategoryType::cases() as $type) {
+            $this->cacheQuery("category_tree_{$type->value}", function () use ($type) {
+                return Category::ofType($type)
+                    ->with('children')
+                    ->whereNull('parent_id')
+                    ->orderBy('sort_order')
+                    ->get();
+            }, ['categories', 'trees'], $this->longTtl);
+        }
+
+        // Cache recent releases
+        $this->cacheQuery('recent_releases', function () {
+            return Album::with(['artist', 'tracks'])
+                ->where('release_date', '>=', now()->subMonths(3))
+                ->orderByDesc('release_date')
+                ->limit(100)
+                ->get();
+        }, ['albums', 'recent'], $this->shortTtl);
+    }
+
+    /**
+     * Get model cache key
+     */
+    protected function getModelCacheKey($model, int $id = null): string
+    {
+        if ($model instanceof Model) {
+            return "model_{$model::class}_{$model->id}";
+        }
+        
+        return "model_{$model}_{$id}";
+    }
+
+    /**
+     * Add model to invalidation set
+     */
+    protected function addToInvalidationSet(string $modelClass, int $id): void
+    {
+        $setKey = "invalidation_set_{$modelClass}";
+        Redis::sadd($setKey, $id);
+        Redis::expire($setKey, $this->longTtl);
+    }
+
+    /**
+     * Remove model from invalidation set
+     */
+    protected function removeFromInvalidationSet(string $modelClass, int $id): void
+    {
+        $setKey = "invalidation_set_{$modelClass}";
+        Redis::srem($setKey, $id);
+    }
+
+    /**
+     * Invalidate related caches
+     */
+    protected function invalidateRelatedCaches(Model $model): void
+    {
+        $modelClass = $model::class;
+        
+        // Invalidate based on model type
+        switch ($modelClass) {
+            case Artist::class:
+                $this->invalidateByTags(['artists', 'popular']);
+                break;
+                
+            case Album::class:
+                $this->invalidateByTags(['albums', 'recent']);
+                // Also invalidate artist cache
+                if ($model->artist) {
+                    $this->invalidateModel($model->artist);
+                }
+                break;
+                
+            case Category::class:
+                $this->invalidateByTags(['categories', 'trees']);
+                break;
+        }
+    }
+}
+```
+
+## Eager Loading Patterns
+
+### Advanced Eager Loading
+
+```php
+<?php
+// app/Traits/OptimizedEagerLoading.php
+
+namespace App\Traits;
+
+use Illuminate\Database\Eloquent\Builder;
+
+trait OptimizedEagerLoading
+{
+    /**
+     * Scope for optimized eager loading
+     */
+    public function scopeWithOptimizedRelations(Builder $query): Builder
+    {
+        return $query->with([
+            'categories' => function ($q) {
+                $q->select(['id', 'name', 'slug', 'type'])
+                  ->where('is_active', true)
+                  ->orderBy('pivot_sort_order');
+            },
+            'tags' => function ($q) {
+                $q->select(['id', 'name', 'slug'])
+                  ->where('is_active', true);
+            }
+        ]);
+    }
+
+    /**
+     * Load relationships conditionally
+     */
+    public function scopeWithConditionalRelations(Builder $query, array $relations = []): Builder
+    {
+        $defaultRelations = [
+            'categories' => function ($q) {
+                $q->select(['id', 'name', 'type'])->where('is_active', true);
+            }
+        ];
+
+        $relationsToLoad = array_merge($defaultRelations, $relations);
+
+        return $query->with($relationsToLoad);
+    }
+
+    /**
+     * Lazy eager load with constraints
+     */
+    public function loadOptimizedRelations(array $relations = []): self
+    {
+        $this->load([
+            'categories' => function ($q) {
+                $q->select(['id', 'name', 'slug', 'type'])
+                  ->where('is_active', true);
+            },
+            ...$relations
+        ]);
+
+        return $this;
+    }
+}
+```
+
+## Index Optimization
+
+### Database Index Manager
+
+```php
+<?php
+// app/Services/IndexOptimizationService.php
+
+namespace App\Services;
+
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+
+class IndexOptimizationService
+{
+    /**
+     * Analyze and suggest indexes
+     */
+    public function analyzeIndexUsage(): array
+    {
+        $analysis = [];
+
+        if (DB::getDriverName() === 'sqlite') {
+            // SQLite-specific analysis
+            $analysis = $this->analyzeSQLiteIndexes();
+        }
+
+        return $analysis;
+    }
+
+    /**
+     * Analyze SQLite indexes
+     */
+    protected function analyzeSQLiteIndexes(): array
+    {
+        $tables = ['artists', 'albums', 'tracks', 'categories', 'categorizables'];
+        $analysis = [];
+
+        foreach ($tables as $table) {
+            $indexes = DB::select("PRAGMA index_list({$table})");
+            $analysis[$table] = [
+                'indexes' => $indexes,
+                'suggestions' => $this->suggestIndexes($table)
+            ];
+        }
+
+        return $analysis;
+    }
+
+    /**
+     * Suggest indexes based on common queries
+     */
+    protected function suggestIndexes(string $table): array
+    {
+        $suggestions = [];
+
+        switch ($table) {
+            case 'artists':
+                $suggestions = [
+                    'idx_artists_active_created' => ['is_active', 'created_at'],
+                    'idx_artists_name_active' => ['name', 'is_active'],
+                    'idx_artists_public_slug' => ['public_id', 'slug'],
+                ];
+                break;
+
+            case 'albums':
+                $suggestions = [
+                    'idx_albums_artist_release' => ['artist_id', 'release_date'],
+                    'idx_albums_active_release' => ['is_active', 'release_date'],
+                    'idx_albums_genre_year' => ['genre_id', 'release_year'],
+                ];
+                break;
+
+            case 'tracks':
+                $suggestions = [
+                    'idx_tracks_album_number' => ['album_id', 'track_number'],
+                    'idx_tracks_duration_active' => ['duration_ms', 'is_active'],
+                    'idx_tracks_genre_duration' => ['genre_id', 'duration_ms'],
+                ];
+                break;
+
+            case 'categories':
+                $suggestions = [
+                    'idx_categories_type_active' => ['type', 'is_active'],
+                    'idx_categories_parent_sort' => ['parent_id', 'sort_order'],
+                    'idx_categories_slug_type' => ['slug', 'type'],
+                ];
+                break;
+
+            case 'categorizables':
+                $suggestions = [
+                    'idx_categorizables_morph' => ['categorizable_type', 'categorizable_id'],
+                    'idx_categorizables_category_type' => ['category_id', 'category_type'],
+                    'idx_categorizables_primary' => ['is_primary', 'category_type'],
+                ];
+                break;
+        }
+
+        return $suggestions;
+    }
+
+    /**
+     * Create recommended indexes
+     */
+    public function createRecommendedIndexes(): array
+    {
+        $created = [];
+        $tables = ['artists', 'albums', 'tracks', 'categories', 'categorizables'];
+
+        foreach ($tables as $table) {
+            $suggestions = $this->suggestIndexes($table);
+
+            foreach ($suggestions as $indexName => $columns) {
+                if (!$this->indexExists($table, $indexName)) {
+                    $this->createIndex($table, $indexName, $columns);
+                    $created[] = "{$table}.{$indexName}";
+                }
+            }
+        }
+
+        return $created;
+    }
+
+    /**
+     * Check if index exists
+     */
+    protected function indexExists(string $table, string $indexName): bool
+    {
+        if (DB::getDriverName() === 'sqlite') {
+            $indexes = DB::select("PRAGMA index_list({$table})");
+            return collect($indexes)->pluck('name')->contains($indexName);
+        }
+
+        return false;
+    }
+
+    /**
+     * Create index
+     */
+    protected function createIndex(string $table, string $indexName, array $columns): void
+    {
+        $columnList = implode(', ', $columns);
+        DB::statement("CREATE INDEX {$indexName} ON {$table} ({$columnList})");
+    }
+
+    /**
+     * Drop unused indexes
+     */
+    public function dropUnusedIndexes(): array
+    {
+        $dropped = [];
+
+        // This would require query analysis to determine unused indexes
+        // Implementation depends on database system capabilities
+
+        return $dropped;
+    }
+}
+```
+
+## Memory Management
+
+### Memory Optimization Service
+
+```php
+<?php
+// app/Services/MemoryOptimizationService.php
+
+namespace App\Services;
+
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\LazyCollection;
+
+class MemoryOptimizationService
+{
+    /**
+     * Process large datasets with chunking
+     */
+    public function processLargeDataset(string $modelClass, callable $processor, int $chunkSize = 1000): void
+    {
+        $modelClass::chunk($chunkSize, function ($models) use ($processor) {
+            $processor($models);
+
+            // Force garbage collection after each chunk
+            if (function_exists('gc_collect_cycles')) {
+                gc_collect_cycles();
+            }
+        });
+    }
+
+    /**
+     * Use lazy collections for memory efficiency
+     */
+    public function getLazyCollection(string $modelClass): LazyCollection
+    {
+        return $modelClass::lazy();
+    }
+
+    /**
+     * Optimize collection memory usage
+     */
+    public function optimizeCollection(Collection $collection): Collection
+    {
+        // Remove unnecessary attributes
+        return $collection->map(function ($model) {
+            return $model->only([
+                'id', 'name', 'slug', 'public_id', 'is_active'
+            ]);
+        });
+    }
+
+    /**
+     * Memory-efficient batch processing
+     */
+    public function batchProcess(array $items, callable $processor, int $batchSize = 100): void
+    {
+        $batches = array_chunk($items, $batchSize);
+
+        foreach ($batches as $batch) {
+            $processor($batch);
+
+            // Clear memory after each batch
+            unset($batch);
+
+            if (function_exists('gc_collect_cycles')) {
+                gc_collect_cycles();
+            }
+        }
+    }
+
+    /**
+     * Monitor memory usage
+     */
+    public function getMemoryUsage(): array
+    {
+        return [
+            'current' => memory_get_usage(true),
+            'peak' => memory_get_peak_usage(true),
+            'limit' => ini_get('memory_limit'),
+            'formatted' => [
+                'current' => $this->formatBytes(memory_get_usage(true)),
+                'peak' => $this->formatBytes(memory_get_peak_usage(true)),
+            ]
+        ];
+    }
+
+    /**
+     * Format bytes to human readable
+     */
+    protected function formatBytes(int $bytes): string
+    {
+        $units = ['B', 'KB', 'MB', 'GB'];
+        $bytes = max($bytes, 0);
+        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
+        $pow = min($pow, count($units) - 1);
+
+        $bytes /= pow(1024, $pow);
+
+        return round($bytes, 2) . ' ' . $units[$pow];
+    }
+}
+```
+
+## Monitoring and Profiling
+
+### Performance Monitor
+
+```php
+<?php
+// app/Services/PerformanceMonitor.php
+
+namespace App\Services;
+
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+
+class PerformanceMonitor
+{
+    protected array $queryLog = [];
+    protected float $startTime;
+
+    /**
+     * Start monitoring
+     */
+    public function start(): void
+    {
+        $this->startTime = microtime(true);
+        DB::enableQueryLog();
+    }
+
+    /**
+     * Stop monitoring and get results
+     */
+    public function stop(): array
+    {
+        $endTime = microtime(true);
+        $queries = DB::getQueryLog();
+        DB::disableQueryLog();
+
+        $totalTime = $endTime - $this->startTime;
+        $queryTime = array_sum(array_column($queries, 'time'));
+
+        return [
+            'total_time' => $totalTime,
+            'query_time' => $queryTime / 1000, // Convert to seconds
+            'query_count' => count($queries),
+            'queries' => $queries,
+            'slow_queries' => $this->findSlowQueries($queries),
+            'memory_usage' => memory_get_peak_usage(true),
+        ];
+    }
+
+    /**
+     * Find slow queries
+     */
+    protected function findSlowQueries(array $queries, float $threshold = 100): array
+    {
+        return array_filter($queries, function ($query) use ($threshold) {
+            return $query['time'] > $threshold;
+        });
+    }
+
+    /**
+     * Log performance metrics
+     */
+    public function logPerformance(array $metrics): void
+    {
+        if ($metrics['total_time'] > 1.0) { // Log if over 1 second
+            Log::warning('Slow request detected', [
+                'total_time' => $metrics['total_time'],
+                'query_count' => $metrics['query_count'],
+                'memory_usage' => $metrics['memory_usage'],
+                'slow_queries' => count($metrics['slow_queries']),
+            ]);
+        }
+    }
+
+    /**
+     * Detect N+1 queries
+     */
+    public function detectNPlusOne(array $queries): array
+    {
+        $patterns = [];
+
+        foreach ($queries as $query) {
+            $sql = $query['query'];
+            $pattern = preg_replace('/\d+/', '?', $sql);
+
+            if (!isset($patterns[$pattern])) {
+                $patterns[$pattern] = 0;
+            }
+            $patterns[$pattern]++;
+        }
+
+        return array_filter($patterns, function ($count) {
+            return $count > 10; // Threshold for N+1 detection
+        });
+    }
+}
+```
+
+## Testing Performance
+
+### Performance Test Suite
+
+```php
+<?php
+// tests/Performance/ModelPerformanceTest.php
+
+use App\Models\Artist;
+use App\Models\Album;
+use App\Services\PerformanceMonitor;
+use Tests\TestCase;
+
+class ModelPerformanceTest extends TestCase
+{
+    protected PerformanceMonitor $monitor;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->monitor = app(PerformanceMonitor::class);
+    }
+
+    public function test_artist_query_performance(): void
+    {
+        // Create test data
+        Artist::factory()->count(1000)->create();
+
+        $this->monitor->start();
+
+        $artists = Artist::with('albums')
+            ->where('is_active', true)
+            ->limit(100)
+            ->get();
+
+        $metrics = $this->monitor->stop();
+
+        $this->assertLessThan(0.5, $metrics['total_time']); // Should complete in under 500ms
+        $this->assertLessThan(10, $metrics['query_count']); // Should use minimal queries
+        $this->assertEmpty($metrics['slow_queries']); // No slow queries
+    }
+
+    public function test_category_tree_performance(): void
+    {
+        // Create nested categories
+        $root = Category::factory()->create();
+        $children = Category::factory()->count(50)->create(['parent_id' => $root->id]);
+
+        foreach ($children as $child) {
+            Category::factory()->count(10)->create(['parent_id' => $child->id]);
+        }
+
+        $this->monitor->start();
+
+        $tree = Category::with('children.children')
+            ->whereNull('parent_id')
+            ->get();
+
+        $metrics = $this->monitor->stop();
+
+        $this->assertLessThan(1.0, $metrics['total_time']);
+        $this->assertLessThan(5, $metrics['query_count']); // Efficient eager loading
+    }
+
+    public function test_bulk_operations_performance(): void
+    {
+        $this->monitor->start();
+
+        // Bulk insert
+        $artists = Artist::factory()->count(1000)->make()->toArray();
+        Artist::insert($artists);
+
+        $metrics = $this->monitor->stop();
+
+        $this->assertLessThan(2.0, $metrics['total_time']);
+        $this->assertLessThan(5, $metrics['query_count']); // Bulk operations should be efficient
+    }
+}
+```
+
+## Best Practices
+
+### Performance Guidelines
+
+1. **Database Optimization**: Use proper indexes and optimize queries
+2. **Caching Strategy**: Implement multi-layer caching with appropriate TTLs
+3. **Memory Management**: Use chunking and lazy collections for large datasets
+4. **Query Optimization**: Prevent N+1 queries with eager loading
+5. **Monitoring**: Continuously monitor performance metrics
+6. **Testing**: Include performance tests in your test suite
+
+### Implementation Checklist
+
+```php
+<?php
+// Performance optimization implementation checklist
+
+/*
+✓ Add database indexes for common query patterns
+✓ Implement multi-layer caching system
+✓ Use eager loading to prevent N+1 queries
+✓ Optimize memory usage with chunking and lazy collections
+✓ Set up performance monitoring and profiling
+✓ Create performance test suite
+✓ Configure database for optimal performance
+✓ Implement query optimization patterns
+✓ Add memory management strategies
+✓ Set up automated performance alerts
+✓ Document performance benchmarks
+✓ Regular performance audits and optimization
+*/
+```
+
+## Navigation
+
+**← Previous:** [Tree Operations Guide](100-tree-operations.md)
+**Next →** [Scopes and Filters Guide](120-scopes-filters.md)
+
+**Related Guides:**
+- [Model Architecture Guide](010-model-architecture.md) - Foundation model patterns
+- [Query Optimization](../deployment/060-database-optimization.md) - Database-level optimization
+- [Caching Strategy](../deployment/080-caching-strategy.md) - Application caching patterns
+
+---
+
+*This guide provides comprehensive performance optimization techniques for Laravel 12 models in the Chinook application. The strategies include database optimization, query efficiency, multi-layer caching, and memory management for high-performance applications.*

@@ -1,0 +1,50 @@
+@import '../../../../vendor/filament/filament/resources/css/theme.css';
+
+@source '../../../../app/Filament/Admin/**/*';
+@source '../../../../resources/views/filament/admin/**/*';
+
+/* Your custom Filament styles here */
+/*:root {*/
+/*    --primary-50: #fffbeb;*/
+/*    --primary-500: #f59e0b;*/
+/*    --primary-600: #d97706;*/
+/*}*/
+
+/* Hide scrollbars */
+.fi-sidebar-nav::-webkit-scrollbar {
+    display: none;
+}
+
+.fi-sidebar-nav {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+/* Custom sidebar styling */
+aside.fi-sidebar {
+    @apply bg-gradient-to-b from-slate-700 to-slate-800 dark:bg-gradient-to-b dark:from-gray-800 dark:to-gray-900;
+}
+
+aside.fi-sidebar .fi-sidebar-nav {
+    @apply px-2 pt-4;
+}
+
+aside.fi-sidebar .fi-sidebar-nav li.fi-sidebar-item .fi-sidebar-item-icon,
+aside.fi-sidebar .fi-sidebar-nav li.fi-sidebar-item .fi-sidebar-item-label {
+    @apply text-zinc-100;
+}
+
+aside.fi-sidebar .fi-sidebar-nav li.fi-sidebar-item-active .fi-sidebar-item-icon,
+aside.fi-sidebar .fi-sidebar-nav li.fi-sidebar-item-active .fi-sidebar-item-label,
+aside.fi-sidebar .fi-sidebar-nav li.fi-sidebar-item:hover .fi-sidebar-item-icon,
+aside.fi-sidebar .fi-sidebar-nav li.fi-sidebar-item:hover .fi-sidebar-item-label {
+    @apply text-amber-900;
+}
+
+aside.fi-sidebar .fi-sidebar-nav-groups {
+    @apply gap-y-3;
+}
+
+aside.fi-sidebar .fi-topbar-ctn {
+    @apply h-12;
+}

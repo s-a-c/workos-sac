@@ -1,0 +1,44 @@
+includes:
+    - ./vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 8
+
+    paths:
+        - app
+        - bootstrap
+        - config
+        - database
+        - routes
+        - tests
+
+    excludePaths:
+        - vendor
+        - vendor/*
+        - vendor/**/*
+        - node_modules
+        - storage
+        - bootstrap/cache
+        - public
+        - database/migrations
+        - reports/rector/cache (?)
+
+    tmpDir: reports/phpstan
+
+    ignoreErrors:
+        # Ignore errors in migration files if they're not excluded above
+        - '#.*database/migrations/.*#'
+        - '#PHPDoc tag @var#'
+
+    checkExplicitMixed: true
+    checkImplicitMixed: true
+    checkMissingCallableSignature: true
+    reportUnmatchedIgnoredErrors: false
+    treatPhpDocTypesAsCertain: false
+
+    # PHP 8.4 specific settings
+    phpVersion: 80400
+
+    # Performance settings consistent with Rector
+    parallel:
+        maximumNumberOfProcesses: 8

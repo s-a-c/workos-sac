@@ -1,0 +1,491 @@
+// Chinook Database Schema Definition (DBML v2.6+)
+// Enterprise-grade music store database with single taxonomy system
+// Created: 2025-01-06
+// Updated: 2025-07-10 (Single Taxonomy Implementation)
+// Version: 3.0.0
+// Architecture: Laravel 12 + Single Taxonomy System (aliziodev/laravel-taxonomy)
+
+Project chinook_enterprise {
+  database_type: 'SQLite'
+  Note: '''
+    # Chinook Enterprise Database Schema with Single Taxonomy System
+
+    Modern Laravel 12 implementation of the Chinook music store database with:
+    - SQLite with WAL mode optimization for concurrent access and performance
+    - Single taxonomy system using aliziodev/laravel-taxonomy package
+    - Direct genre-to-taxonomy mapping from original chinook.sql data
+    - Greenfield implementation with clean architecture
+    - Role-based access control (RBAC) with Spatie Laravel Permission
+    - Modern Laravel features: timestamps, soft deletes, user stamps, secondary keys, slugs
+    - Enterprise-grade performance optimization and SQLite-specific indexing
+
+    ## Single Taxonomy Architecture:
+
+    ### Taxonomy System Features:
+    - Direct mapping of 25 original genres from chinook.sql
+    - Hierarchical taxonomy support with nested set model
+    - Polymorphic relationships via taxonomables table
+    - Type-based taxonomy organization (genre, mood, theme, etc.)
+    - Metadata preservation with original IDs for compatibility
+
+    ### Implementation Strategy:
+    - Single source of truth for all categorization
+    - No dual systems or migration complexity
+    - Clean greenfield implementation approach
+    - Direct taxonomy relationships on all models
+    - Comprehensive data access facilities (CLI + web + API)
+  '''
+}
+
+// Core Music Tables
+Table chinook_artists {
+  id bigint [pk, increment, note: 'Primary key']
+  public_id varchar(26) [unique, not null, note: 'ULID - Public-facing identifier for APIs']
+  slug varchar(255) [unique, not null, note: 'URL-friendly identifier generated from public_id']
+  name varchar(255) [not null, note: 'Artist or band name']
+  biography text [note: 'Artist biography and background information']
+  website varchar(500) [note: 'Official website URL']
+  social_links json [note: 'Social media links and profiles']
+  country varchar(100) [note: 'Country of origin']
+  formed_year int [note: 'Year the artist/band was formed']
+  is_active boolean [default: true, not null, note: 'Whether the artist is currently active']
+
+  // Laravel 12 Modern Features
+  created_by bigint [ref: > users.id, note: 'User who created this record']
+  updated_by bigint [ref: > users.id, note: 'User who last updated this record']
+  created_at timestamp [default: `CURRENT_TIMESTAMP`, note: 'Record creation timestamp']
+  updated_at timestamp [default: `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`, note: 'Last update timestamp']
+  deleted_at timestamp [null, note: 'Soft delete timestamp']
+
+  indexes {
+    (public_id) [unique, name: 'chinook_artists_public_id_unique']
+    (slug) [unique, name: 'chinook_artists_slug_unique']
+    (name) [name: 'chinook_artists_name_index']
+    (country) [name: 'chinook_artists_country_index']
+    (is_active) [name: 'chinook_artists_is_active_index']
+    (created_by) [name: 'chinook_artists_created_by_index']
+    (updated_by) [name: 'chinook_artists_updated_by_index']
+    (deleted_at) [name: 'chinook_artists_deleted_at_index']
+  }
+
+  Note: 'Music artists and bands with taxonomy relationships and modern Laravel features'
+}
+
+Table chinook_albums {
+  id bigint [pk, increment, note: 'Primary key']
+  public_id varchar(26) [unique, not null, note: 'ULID - Public-facing identifier for APIs']
+  slug varchar(255) [unique, not null, note: 'URL-friendly identifier generated from public_id']
+  artist_id bigint [ref: > chinook_artists.id, not null, note: 'Reference to the artist who created this album']
+  title varchar(255) [not null, note: 'Album title']
+  release_date date [note: 'Album release date']
+  label varchar(255) [note: 'Record label']
+  catalog_number varchar(100) [note: 'Catalog number from the record label']
+  description text [note: 'Album description and notes']
+  cover_image_url varchar(500) [note: 'URL to album cover art']
+  total_tracks int [default: 0, note: 'Total number of tracks on the album']
+  total_duration_ms bigint [default: 0, note: 'Total album duration in milliseconds']
+  is_compilation boolean [default: false, note: 'Whether this is a compilation album']
+  is_explicit boolean [default: false, note: 'Whether the album contains explicit content']
+  is_active boolean [default: true, not null, note: 'Whether the album is currently active/available']
+
+  // Laravel 12 Modern Features
+  created_by bigint [ref: > users.id, note: 'User who created this record']
+  updated_by bigint [ref: > users.id, note: 'User who last updated this record']
+  created_at timestamp [default: `CURRENT_TIMESTAMP`, note: 'Record creation timestamp']
+  updated_at timestamp [default: `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`, note: 'Last update timestamp']
+  deleted_at timestamp [null, note: 'Soft delete timestamp']
+
+  indexes {
+    (public_id) [unique, name: 'chinook_albums_public_id_unique']
+    (slug) [unique, name: 'chinook_albums_slug_unique']
+    (artist_id) [name: 'chinook_albums_artist_id_index']
+    (title) [name: 'chinook_albums_title_index']
+    (release_date) [name: 'chinook_albums_release_date_index']
+    (is_active) [name: 'chinook_albums_is_active_index']
+    (created_by) [name: 'chinook_albums_created_by_index']
+    (updated_by) [name: 'chinook_albums_updated_by_index']
+    (deleted_at) [name: 'chinook_albums_deleted_at_index']
+  }
+
+  Note: 'Albums belonging to artists with enhanced metadata and taxonomy relationships'
+}
+
+Table chinook_tracks {
+  id bigint [pk, increment, note: 'Primary key']
+  public_id varchar(19) [unique, not null, note: 'Snowflake ID - High-performance identifier for large datasets']
+  slug varchar(255) [unique, not null, note: 'URL-friendly identifier generated from public_id']
+  album_id bigint [ref: > chinook_albums.id, not null, note: 'Reference to the album containing this track']
+  media_type_id bigint [ref: > chinook_media_types.id, not null, note: 'Reference to the media type/format']
+  name varchar(255) [not null, note: 'Track name/title']
+  composer varchar(255) [note: 'Composer of the track']
+  milliseconds bigint [not null, note: 'Track duration in milliseconds']
+  bytes bigint [note: 'File size in bytes']
+  unit_price decimal(10,2) [not null, note: 'Price per track for purchase']
+  track_number int [note: 'Track number on the album']
+  disc_number int [default: 1, note: 'Disc number for multi-disc albums']
+  is_explicit boolean [default: false, note: 'Whether the track contains explicit content']
+  is_active boolean [default: true, not null, note: 'Whether the track is currently active/available']
+  preview_url varchar(500) [note: 'URL to track preview/sample']
+  lyrics text [note: 'Track lyrics']
+
+  // Laravel 12 Modern Features
+  created_by bigint [ref: > users.id, note: 'User who created this record']
+  updated_by bigint [ref: > users.id, note: 'User who last updated this record']
+  created_at timestamp [default: `CURRENT_TIMESTAMP`, note: 'Record creation timestamp']
+  updated_at timestamp [default: `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`, note: 'Last update timestamp']
+  deleted_at timestamp [null, note: 'Soft delete timestamp']
+
+  indexes {
+    (public_id) [unique, name: 'chinook_tracks_public_id_unique']
+    (slug) [unique, name: 'chinook_tracks_slug_unique']
+    (album_id) [name: 'chinook_tracks_album_id_index']
+    (media_type_id) [name: 'chinook_tracks_media_type_id_index']
+    (name) [name: 'chinook_tracks_name_index']
+    (unit_price) [name: 'chinook_tracks_unit_price_index']
+    (is_active) [name: 'chinook_tracks_is_active_index']
+    (created_by) [name: 'chinook_tracks_created_by_index']
+    (updated_by) [name: 'chinook_tracks_updated_by_index']
+    (deleted_at) [name: 'chinook_tracks_deleted_at_index']
+    (album_id, track_number) [name: 'chinook_tracks_album_track_number_index']
+  }
+
+  Note: 'Individual songs with taxonomy relationships (replaces traditional genre_id foreign key)'
+}
+
+Table chinook_media_types {
+  id bigint [pk, increment, note: 'Primary key']
+  public_id varchar(36) [unique, not null, note: 'UUID - Standards-compliant identifier for reference data']
+  slug varchar(255) [unique, not null, note: 'URL-friendly identifier generated from public_id']
+  name varchar(255) [not null, note: 'Media type name (MP3, AAC, FLAC, etc.)']
+  mime_type varchar(100) [note: 'MIME type for the media format']
+  file_extension varchar(10) [note: 'File extension (mp3, aac, flac, etc.)']
+  description text [note: 'Description of the media type and its characteristics']
+  is_active boolean [default: true, not null, note: 'Whether this media type is currently supported']
+
+  // Laravel 12 Modern Features
+  created_by bigint [ref: > users.id, note: 'User who created this record']
+  updated_by bigint [ref: > users.id, note: 'User who last updated this record']
+  created_at timestamp [default: `CURRENT_TIMESTAMP`, note: 'Record creation timestamp']
+  updated_at timestamp [default: `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`, note: 'Last update timestamp']
+  deleted_at timestamp [null, note: 'Soft delete timestamp']
+
+  indexes {
+    (public_id) [unique, name: 'media_types_public_id_unique']
+    (slug) [unique, name: 'media_types_slug_unique']
+    (name) [unique, name: 'media_types_name_unique']
+    (mime_type) [name: 'media_types_mime_type_index']
+    (file_extension) [name: 'media_types_file_extension_index']
+    (is_active) [name: 'media_types_is_active_index']
+    (created_by) [name: 'media_types_created_by_index']
+    (updated_by) [name: 'media_types_updated_by_index']
+    (deleted_at) [name: 'media_types_deleted_at_index']
+  }
+
+  Note: 'File formats (MP3, AAC, FLAC, etc.) with enhanced metadata and technical specifications'
+}
+
+// Single Taxonomy System (aliziodev/laravel-taxonomy)
+// Direct mapping from original chinook.sql genres to taxonomy records
+
+
+
+// Single Taxonomy System (aliziodev/laravel-taxonomy)
+// Direct mapping from original chinook.sql genres with comprehensive taxonomy support
+Table chinook_taxonomies {
+  id bigint [pk, increment, note: 'Primary key']
+  name varchar(255) [not null, note: 'Taxonomy term name']
+  slug varchar(255) [not null, note: 'URL-friendly identifier']
+  type varchar(255) [not null, note: 'Taxonomy type (genre, mood, theme, etc.)']
+  description text [note: 'Taxonomy term description']
+  parent_id bigint [ref: > chinook_taxonomies.id, null, note: 'Parent taxonomy for hierarchical structure']
+  sort_order int [default: 0, note: 'Display sort order']
+  lft int [note: 'Left boundary for nested set model']
+  rgt int [note: 'Right boundary for nested set model']
+  depth int [note: 'Hierarchy depth level']
+  meta json [note: 'Additional metadata']
+
+  created_at timestamp [default: `CURRENT_TIMESTAMP`, note: 'Record creation timestamp']
+  updated_at timestamp [default: `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`, note: 'Last update timestamp']
+  deleted_at timestamp [null, note: 'Soft delete timestamp']
+
+  indexes {
+    (slug, type) [unique, name: 'taxonomies_slug_type_unique']
+    (type, lft, rgt) [name: 'taxonomies_type_lft_rgt_index']
+    (parent_id) [name: 'taxonomies_parent_id_index']
+    (type) [name: 'taxonomies_type_index']
+    (lft) [name: 'taxonomies_lft_index']
+    (rgt) [name: 'taxonomies_rgt_index']
+    (depth) [name: 'taxonomies_depth_index']
+  }
+
+  Note: '''
+    Single taxonomy system using aliziodev/laravel-taxonomy package.
+    Direct mapping of 25 original genres from chinook.sql without enhancement.
+    Implements nested set model for efficient hierarchical queries.
+    Serves as the sole categorization system for all models.
+  '''
+}
+
+// Polymorphic Pivot Table for Taxonomy Assignments
+Table chinook_taxonomables {
+  id bigint [pk, increment, note: 'Primary key']
+  taxonomy_id bigint [ref: > chinook_taxonomies.id, not null, note: 'Reference to the taxonomy']
+  taxonomable_id varchar(36) [not null, note: 'UUID of the taxonomized model (polymorphic)']
+  taxonomable_type varchar(255) [not null, note: 'Class name of the taxonomized model (polymorphic)']
+
+  created_at timestamp [default: `CURRENT_TIMESTAMP`, note: 'Record creation timestamp']
+  updated_at timestamp [default: `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`, note: 'Last update timestamp']
+
+  indexes {
+    (taxonomy_id, taxonomable_id, taxonomable_type) [unique, name: 'taxonomables_unique']
+    (taxonomable_id, taxonomable_type) [name: 'taxonomables_taxonomable_index']
+    (taxonomy_id) [name: 'taxonomables_taxonomy_id_index']
+  }
+
+  Note: '''
+    Polymorphic many-to-many relationship table for taxonomy assignments.
+    Single source of truth for all model categorization relationships.
+    Uses UUID morphs for enhanced compatibility with various ID types.
+    Replaces traditional genre_id foreign keys with flexible taxonomy system.
+  '''
+}
+
+// Direct Taxonomy Mapping System
+// Note: Original genres table is not used in the single taxonomy system approach
+
+Note: '''
+  Direct mapping strategy:
+  1. Map 25 original genres directly to taxonomy records
+  2. Store original IDs in taxonomy metadata for reference
+  3. Use taxonomables table for all model relationships
+  4. No migration complexity or dual systems
+
+  Original genres mapped to taxonomies:
+  1=Rock, 2=Jazz, 3=Metal, 4=Alternative & Punk, 5=Rock And Roll,
+  6=Blues, 7=Latin, 8=Reggae, 9=Pop, 10=Soundtrack, 11=Bossa Nova,
+  12=Easy Listening, 13=Heavy Metal, 14=R&B/Soul, 15=Electronica/Dance,
+  16=World, 17=Hip Hop/Rap, 18=Science Fiction, 19=TV Shows,
+  20=Sci Fi & Fantasy, 21=Drama, 22=Comedy, 23=Alternative,
+  24=Classical, 25=Opera
+'''
+
+// Customer Management Tables
+Table chinook_customers {
+  id bigint [pk, increment, note: 'Primary key']
+  public_id varchar(26) [unique, not null, note: 'ULID - Public-facing identifier for APIs']
+  slug varchar(255) [unique, not null, note: 'URL-friendly identifier generated from public_id']
+  support_rep_id bigint [ref: > chinook_employees.id, note: 'Assigned customer support representative']
+  first_name varchar(100) [not null, note: 'Customer first name']
+  last_name varchar(100) [not null, note: 'Customer last name']
+  company varchar(255) [note: 'Company name (for business customers)']
+  address varchar(255) [note: 'Street address']
+  city varchar(100) [note: 'City']
+  state varchar(100) [note: 'State or province']
+  country varchar(100) [note: 'Country']
+  postal_code varchar(20) [note: 'Postal or ZIP code']
+  phone varchar(50) [note: 'Phone number']
+  fax varchar(50) [note: 'Fax number']
+  email varchar(255) [unique, not null, note: 'Email address (unique)']
+  date_of_birth date [note: 'Date of birth for age verification and marketing']
+  preferences json [note: 'Customer preferences and settings']
+  is_active boolean [default: true, not null, note: 'Whether the customer account is active']
+
+  // Laravel 12 Modern Features
+  created_by bigint [ref: > users.id, note: 'User who created this record']
+  updated_by bigint [ref: > users.id, note: 'User who last updated this record']
+  created_at timestamp [default: `CURRENT_TIMESTAMP`, note: 'Record creation timestamp']
+  updated_at timestamp [default: `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`, note: 'Last update timestamp']
+  deleted_at timestamp [null, note: 'Soft delete timestamp']
+
+  indexes {
+    (public_id) [unique, name: 'customers_public_id_unique']
+    (slug) [unique, name: 'customers_slug_unique']
+    (email) [unique, name: 'customers_email_unique']
+    (support_rep_id) [name: 'customers_support_rep_id_index']
+    (last_name, first_name) [name: 'customers_name_index']
+    (city) [name: 'customers_city_index']
+    (country) [name: 'customers_country_index']
+    (is_active) [name: 'customers_is_active_index']
+    (created_by) [name: 'customers_created_by_index']
+    (updated_by) [name: 'customers_updated_by_index']
+    (deleted_at) [name: 'customers_deleted_at_index']
+  }
+
+  Note: 'Customer information with support representatives, preferences, and polymorphic category relationships'
+}
+
+Table chinook_employees {
+  id bigint [pk, increment, note: 'Primary key']
+  public_id varchar(26) [unique, not null, note: 'ULID - Public-facing identifier for APIs']
+  slug varchar(255) [unique, not null, note: 'URL-friendly identifier generated from public_id']
+  reports_to bigint [ref: > chinook_employees.id, note: 'Manager/supervisor reference (self-referencing)']
+  last_name varchar(100) [not null, note: 'Employee last name']
+  first_name varchar(100) [not null, note: 'Employee first name']
+  title varchar(255) [note: 'Job title']
+  email varchar(255) [unique, not null, note: 'Employee email address (unique)']
+  phone varchar(50) [note: 'Phone number']
+  fax varchar(50) [note: 'Fax number']
+  birth_date date [note: 'Date of birth']
+  hire_date date [note: 'Date of hire']
+  address varchar(255) [note: 'Street address']
+  city varchar(100) [note: 'City']
+  state varchar(100) [note: 'State or province']
+  country varchar(100) [note: 'Country']
+  postal_code varchar(20) [note: 'Postal or ZIP code']
+  salary decimal(10,2) [note: 'Employee salary']
+  is_active boolean [default: true, not null, note: 'Whether the employee is currently active']
+
+  // Laravel 12 Modern Features
+  created_by bigint [ref: > users.id, note: 'User who created this record']
+  updated_by bigint [ref: > users.id, note: 'User who last updated this record']
+  created_at timestamp [default: `CURRENT_TIMESTAMP`, note: 'Record creation timestamp']
+  updated_at timestamp [default: `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`, note: 'Last update timestamp']
+  deleted_at timestamp [null, note: 'Soft delete timestamp']
+
+  indexes {
+    (public_id) [unique, name: 'employees_public_id_unique']
+    (slug) [unique, name: 'employees_slug_unique']
+    (email) [unique, name: 'employees_email_unique']
+    (reports_to) [name: 'employees_reports_to_index']
+    (last_name, first_name) [name: 'employees_name_index']
+    (title) [name: 'employees_title_index']
+    (hire_date) [name: 'employees_hire_date_index']
+    (is_active) [name: 'employees_is_active_index']
+    (created_by) [name: 'employees_created_by_index']
+    (updated_by) [name: 'employees_updated_by_index']
+    (deleted_at) [name: 'employees_deleted_at_index']
+  }
+
+  Note: 'Company employees with hierarchical relationships, RBAC integration, and customer support assignments'
+}
+
+// Sales System Tables
+Table chinook_invoices {
+  id bigint [pk, increment, note: 'Primary key']
+  public_id varchar(26) [unique, not null, note: 'ULID - Public-facing identifier for APIs']
+  slug varchar(255) [unique, not null, note: 'URL-friendly identifier generated from public_id']
+  customer_id bigint [ref: > chinook_customers.id, not null, note: 'Reference to the purchasing customer']
+  invoice_date date [not null, note: 'Date the invoice was created']
+  billing_address varchar(255) [note: 'Billing street address']
+  billing_city varchar(100) [note: 'Billing city']
+  billing_state varchar(100) [note: 'Billing state or province']
+  billing_country varchar(100) [note: 'Billing country']
+  billing_postal_code varchar(20) [note: 'Billing postal or ZIP code']
+  total decimal(10,2) [not null, note: 'Total invoice amount']
+  status varchar(50) [default: 'pending', note: 'Invoice status (pending, paid, cancelled, refunded)']
+  payment_details json [note: 'Payment method and transaction information']
+
+  // Laravel 12 Modern Features
+  created_by bigint [ref: > users.id, note: 'User who created this record']
+  updated_by bigint [ref: > users.id, note: 'User who last updated this record']
+  created_at timestamp [default: `CURRENT_TIMESTAMP`, note: 'Record creation timestamp']
+  updated_at timestamp [default: `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`, note: 'Last update timestamp']
+  deleted_at timestamp [null, note: 'Soft delete timestamp']
+
+  indexes {
+    (public_id) [unique, name: 'invoices_public_id_unique']
+    (slug) [unique, name: 'invoices_slug_unique']
+    (customer_id) [name: 'invoices_customer_id_index']
+    (invoice_date) [name: 'invoices_invoice_date_index']
+    (status) [name: 'invoices_status_index']
+    (total) [name: 'invoices_total_index']
+    (created_by) [name: 'invoices_created_by_index']
+    (updated_by) [name: 'invoices_updated_by_index']
+    (deleted_at) [name: 'invoices_deleted_at_index']
+  }
+
+  Note: 'Customer purchase records with enhanced tracking, payment details, and status management'
+}
+
+Table chinook_invoice_lines {
+  id bigint [pk, increment, note: 'Primary key']
+  invoice_id bigint [ref: > chinook_invoices.id, not null, note: 'Reference to the parent invoice']
+  track_id bigint [ref: > chinook_tracks.id, not null, note: 'Reference to the purchased track']
+  unit_price decimal(10,2) [not null, note: 'Price per unit at time of purchase']
+  quantity int [default: 1, not null, note: 'Quantity purchased']
+  line_total decimal(10,2) [not null, note: 'Total amount for this line item']
+
+  created_at timestamp [default: `CURRENT_TIMESTAMP`, note: 'Record creation timestamp']
+  updated_at timestamp [default: `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`, note: 'Last update timestamp']
+
+  indexes {
+    (invoice_id) [name: 'invoice_lines_invoice_id_index']
+    (track_id) [name: 'invoice_lines_track_id_index']
+    (invoice_id, track_id) [unique, name: 'invoice_lines_invoice_track_unique']
+  }
+
+  Note: 'Individual items purchased on each invoice with pricing and quantity information'
+}
+
+// Playlist System Tables
+Table chinook_playlists {
+  id bigint [pk, increment, note: 'Primary key']
+  public_id varchar(26) [unique, not null, note: 'ULID - Public-facing identifier for APIs']
+  slug varchar(255) [unique, not null, note: 'URL-friendly identifier generated from public_id']
+  user_id bigint [ref: > users.id, not null, note: 'Reference to the playlist owner']
+  name varchar(255) [not null, note: 'Playlist name']
+  description text [note: 'Playlist description and notes']
+  is_public boolean [default: false, note: 'Whether the playlist is publicly visible']
+  is_collaborative boolean [default: false, note: 'Whether others can edit this playlist']
+  total_tracks int [default: 0, note: 'Total number of tracks in the playlist']
+  total_duration_ms bigint [default: 0, note: 'Total playlist duration in milliseconds']
+
+  // Laravel 12 Modern Features
+  created_by bigint [ref: > users.id, note: 'User who created this record']
+  updated_by bigint [ref: > users.id, note: 'User who last updated this record']
+  created_at timestamp [default: `CURRENT_TIMESTAMP`, note: 'Record creation timestamp']
+  updated_at timestamp [default: `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`, note: 'Last update timestamp']
+  deleted_at timestamp [null, note: 'Soft delete timestamp']
+
+  indexes {
+    (public_id) [unique, name: 'playlists_public_id_unique']
+    (slug) [unique, name: 'playlists_slug_unique']
+    (user_id) [name: 'playlists_user_id_index']
+    (name) [name: 'playlists_name_index']
+    (is_public) [name: 'playlists_is_public_index']
+    (is_collaborative) [name: 'playlists_is_collaborative_index']
+    (created_by) [name: 'playlists_created_by_index']
+    (updated_by) [name: 'playlists_updated_by_index']
+    (deleted_at) [name: 'playlists_deleted_at_index']
+  }
+
+  Note: 'User-created music playlists with polymorphic categories, collaboration features, and privacy controls'
+}
+
+Table chinook_playlist_track {
+  playlist_id bigint [ref: > chinook_playlists.id, not null, note: 'Reference to the playlist']
+  track_id bigint [ref: > chinook_tracks.id, not null, note: 'Reference to the track']
+  sort_order int [not null, note: 'Order of the track within the playlist']
+  added_at timestamp [default: `CURRENT_TIMESTAMP`, note: 'When the track was added to the playlist']
+  added_by bigint [ref: > users.id, note: 'User who added the track to the playlist']
+
+  created_at timestamp [default: `CURRENT_TIMESTAMP`, note: 'Record creation timestamp']
+  updated_at timestamp [default: `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`, note: 'Last update timestamp']
+
+  indexes {
+    (playlist_id, track_id) [pk, name: 'playlist_track_primary']
+    (track_id) [name: 'playlist_track_track_id_index']
+    (playlist_id, sort_order) [name: 'playlist_track_playlist_sort_index']
+    (added_by) [name: 'playlist_track_added_by_index']
+  }
+
+  Note: 'Many-to-many relationship between playlists and tracks with ordering and audit information'
+}
+
+// Reference to Users table (assumed to exist from Laravel authentication)
+Table users {
+  id bigint [pk, increment, note: 'Primary key']
+  name varchar(255) [not null, note: 'User full name']
+  email varchar(255) [unique, not null, note: 'User email address']
+  email_verified_at timestamp [null, note: 'Email verification timestamp']
+  password varchar(255) [not null, note: 'Hashed password']
+  remember_token varchar(100) [null, note: 'Remember me token']
+  created_at timestamp [default: `CURRENT_TIMESTAMP`, note: 'Record creation timestamp']
+  updated_at timestamp [default: `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`, note: 'Last update timestamp']
+
+  indexes {
+    (email) [unique, name: 'users_email_unique']
+  }
+
+  Note: 'Laravel authentication users table for user stamps and RBAC integration'
+}

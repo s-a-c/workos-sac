@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Support\Str;
 
 return [
@@ -31,15 +33,56 @@ return [
 
     'connections' => [
 
+        // 'sqlite' => [
+        //     'driver' => 'sqlite',
+        //     'url' => env('DB_URL'),
+        //     'database' => env('DB_DATABASE', database_path('database.sqlite')),
+        //     'prefix' => '',
+        //     'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
+        //     'busy_timeout' => null,
+        //     'journal_mode' => null,
+        //     'synchronous' => null,
+        // ],
+
         'sqlite' => [
             'driver' => 'sqlite',
             'url' => env('DB_URL'),
             'database' => env('DB_DATABASE', database_path('database.sqlite')),
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
-            'busy_timeout' => null,
-            'journal_mode' => null,
-            'synchronous' => null,
+            // 'busy_timeout' => null,
+            // 'journal_mode' => null,
+            // 'synchronous' => null,
+            'options' => [
+                // Enable WAL mode immediately on connection
+                PDO::SQLITE_ATTR_OPEN_FLAGS => PDO::SQLITE_OPEN_READWRITE | PDO::SQLITE_OPEN_CREATE,
+            ],
+            // Custom options for UMS-STI optimization
+            'pragmas' => [
+                'auto_vacuum' => 'incremental',
+                'busy_timeout' => 5000,
+                'cache_size' => -64000,     // 64MB cache
+                'foreign_keys' => 'ON',
+                'journal_mode' => 'WAL',
+                // 'mmap_size' => 2147483648,  // 2GB memory mapping
+                'mmap_size' => 268435456,   // 256MB memory mapping
+                'page_size' => 32768,
+                'synchronous' => 'FULL',
+                // 'synchronous' => 'NORMAL',  // Reduces disk sync frequency (vs FULL)
+                'temp_store' => 'MEMORY',
+                'wal_autocheckpoint' => 1000,
+            ],
+        ],
+
+        'testing' => [
+            'driver' => 'sqlite',
+            'database' => database_path('testing.sqlite'),
+            'prefix' => '',
+            'foreign_key_constraints' => true,
+            'journal_mode' => 'WAL',
+            'synchronous' => 'NORMAL',
+            'cache_size' => -64000,
+            'temp_store' => 'MEMORY',
         ],
 
         'mysql' => [
@@ -147,7 +190,7 @@ return [
 
         'options' => [
             'cluster' => env('REDIS_CLUSTER', 'redis'),
-            'prefix' => env('REDIS_PREFIX', Str::slug(env('APP_NAME', 'laravel'), '_').'_database_'),
+            'prefix' => env('REDIS_PREFIX', Str::slug(env('APP_NAME', 'laravel'), '_') . '_database_'),
             'persistent' => env('REDIS_PERSISTENT', false),
         ],
 

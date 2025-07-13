@@ -1,0 +1,675 @@
+# Spatie Tags Implementation Guide
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Installation & Configuration](#installation--configuration)
+- [Basic Tag Implementation](#basic-tag-implementation)
+- [Advanced Tagging Patterns](#advanced-tagging-patterns)
+- [Chinook Integration](#chinook-integration)
+- [Performance Optimization](#performance-optimization)
+- [API Integration](#api-integration)
+- [Testing Strategies](#testing-strategies)
+- [Production Deployment](#production-deployment)
+- [Best Practices](#best-practices)
+
+## Overview
+
+Spatie Laravel Tags provides a flexible tagging system for Eloquent models, enabling powerful categorization and metadata management. This guide demonstrates enterprise-grade implementation patterns for the Chinook music database with Laravel 12 modern syntax and WCAG 2.1 AA compliant documentation.
+
+### Key Features
+
+- **Flexible Tagging**: Attach tags to any Eloquent model
+- **Tag Types**: Organize tags into different categories and types
+- **Polymorphic Relationships**: Single tag system for multiple models
+- **Performance Optimized**: Efficient querying and caching strategies
+- **Laravel 12 Compatible**: Modern syntax with cast() method patterns
+- **Enterprise Ready**: Production-ready configuration and scaling
+
+### Architecture Overview
+
+```mermaid
+---
+title: Spatie Tags Architecture - Chinook Integration
+---
+graph TB
+    subgraph "Tag System"
+        A[Tag Model]
+        B[TagType Enum]
+        C[HasTags Trait]
+    end
+    
+    subgraph "Chinook Models"
+        D[ChinookArtist Model]
+        E[ChinookAlbum Model]
+        F[ChinookTrack Model]
+        G[ChinookPlaylist Model]
+    end
+    
+    subgraph "Tag Categories"
+        H[Genre Tags]
+        I[Mood Tags]
+        J[Era Tags]
+        K[Language Tags]
+    end
+    
+    A --> B
+    C --> A
+    D --> C
+    E --> C
+    F --> C
+    G --> C
+    
+    H --> A
+    I --> A
+    J --> A
+    K --> A
+    
+    style A fill:#1976d2,color:#fff
+    style C fill:#388e3c,color:#fff
+    style H fill:#f57c00,color:#fff
+    style D fill:#d32f2f,color:#fff
+```
+
+## Installation & Configuration
+
+### Package Installation
+
+```bash
+# Install Spatie Tags package
+composer require spatie/laravel-tags
+
+# Publish and run migrations
+php artisan vendor:publish --provider="Spatie\Tags\TagsServiceProvider" --tag="tags-migrations"
+php artisan migrate
+
+# Publish configuration (optional)
+php artisan vendor:publish --provider="Spatie\Tags\TagsServiceProvider" --tag="tags-config"
+```
+
+### Configuration Setup
+
+```php
+// config/tags.php
+<?php
+
+return [
+    /*
+     * The given function generates a URL friendly "slug" from the tag name property before saving it.
+     */
+    'slugger' => null,
+
+    /*
+     * The fully qualified class name of the tag model.
+     */
+    'tag_model' => Spatie\Tags\Tag::class,
+];
+```
+
+### Laravel 12 Model Integration
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Spatie\Tags\HasTags;
+
+class ChinookArtist extends Model
+{
+    use HasTags, SoftDeletes;
+
+    protected $fillable = [
+        'public_id',
+        'name',
+        'biography',
+        'website',
+        'country',
+        'formed_year',
+        'is_active',
+    ];
+
+    /**
+     * Laravel 12 modern casts() method
+     */
+    protected function casts(): array
+    {
+        return [
+            'formed_year' => 'integer',
+            'is_active' => 'boolean',
+            'social_links' => 'array',
+        ];
+    }
+
+    /**
+     * Get tags by type for this artist
+     */
+    public function getTagsByType(string $type): Collection
+    {
+        return $this->tags()->where('type', $type)->get();
+    }
+
+    /**
+     * Add genre tags to artist
+     */
+    public function addGenreTags(array $genres): self
+    {
+        $this->attachTags($genres, 'genre');
+        return $this;
+    }
+}
+```
+
+## Basic Tag Implementation
+
+### Adding Tags to Models
+
+```php
+// Add single tag
+$artist = Artist::find(1);
+$artist->attachTag('rock');
+
+// Add multiple tags
+$artist->attachTags(['rock', 'alternative', 'indie']);
+
+// Add tags with type
+$artist->attachTags(['energetic', 'upbeat'], 'mood');
+$artist->attachTags(['1990s', '2000s'], 'era');
+
+// Add tags using Tag models
+$rockTag = Tag::findOrCreate('rock', 'genre');
+$artist->attachTag($rockTag);
+```
+
+### Querying Tagged Models
+
+```php
+// Find artists with specific tag
+$rockArtists = Artist::withAnyTags(['rock'])->get();
+
+// Find artists with all specified tags
+$indieRockArtists = Artist::withAllTags(['indie', 'rock'])->get();
+
+// Find artists with tags of specific type
+$energeticArtists = Artist::withAnyTagsOfType('mood')->get();
+
+// Complex tag queries
+$artists = Artist::withAnyTags(['rock', 'pop'])
+    ->withAllTags(['energetic'], 'mood')
+    ->where('is_active', true)
+    ->get();
+```
+
+## Advanced Tagging Patterns
+
+### Custom Tag Types
+
+```php
+<?php
+
+namespace App\Enums;
+
+enum TagType: string
+{
+    case GENRE = 'genre';
+    case MOOD = 'mood';
+    case ERA = 'era';
+    case LANGUAGE = 'language';
+    case INSTRUMENT = 'instrument';
+    case THEME = 'theme';
+    case OCCASION = 'occasion';
+
+    public function label(): string
+    {
+        return match($this) {
+            self::GENRE => 'Musical Genre',
+            self::MOOD => 'Mood & Energy',
+            self::ERA => 'Time Period',
+            self::LANGUAGE => 'Language',
+            self::INSTRUMENT => 'Primary Instrument',
+            self::THEME => 'Lyrical Theme',
+            self::OCCASION => 'Listening Occasion',
+        };
+    }
+
+    public function color(): string
+    {
+        return match($this) {
+            self::GENRE => '#1976d2',
+            self::MOOD => '#388e3c',
+            self::ERA => '#f57c00',
+            self::LANGUAGE => '#d32f2f',
+            self::INSTRUMENT => '#7b1fa2',
+            self::THEME => '#00796b',
+            self::OCCASION => '#f57c00',
+        };
+    }
+}
+```
+
+### Tag Management Service
+
+```php
+<?php
+
+namespace App\Services;
+
+use App\Enums\TagType;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection;
+use Spatie\Tags\Tag;
+
+class TagManagementService
+{
+    /**
+     * Sync tags for a model with type validation
+     */
+    public function syncTagsWithTypes(Model $model, array $tagData): void
+    {
+        foreach ($tagData as $type => $tags) {
+            if (!TagType::tryFrom($type)) {
+                throw new InvalidArgumentException("Invalid tag type: {$type}");
+            }
+
+            $model->syncTagsWithType($tags, $type);
+        }
+    }
+
+    /**
+     * Get popular tags by type
+     */
+    public function getPopularTagsByType(string $type, int $limit = 10): Collection
+    {
+        return Tag::where('type', $type)
+            ->withCount('taggables')
+            ->orderBy('taggables_count', 'desc')
+            ->limit($limit)
+            ->get();
+    }
+
+    /**
+     * Clean unused tags
+     */
+    public function cleanUnusedTags(): int
+    {
+        $unusedTags = Tag::doesntHave('taggables')->get();
+        $count = $unusedTags->count();
+        
+        foreach ($unusedTags as $tag) {
+            $tag->delete();
+        }
+        
+        return $count;
+    }
+}
+```
+
+## Chinook Integration
+
+### Artist Tagging Implementation
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Enums\TagType;
+use Illuminate\Database\Eloquent\Model;
+use Spatie\Tags\HasTags;
+
+class Artist extends Model
+{
+    use HasTags;
+
+    /**
+     * Set genre tags for the artist
+     */
+    public function setGenres(array $genres): self
+    {
+        $this->syncTagsWithType($genres, TagType::GENRE->value);
+        return $this;
+    }
+
+    /**
+     * Set mood tags for the artist
+     */
+    public function setMoods(array $moods): self
+    {
+        $this->syncTagsWithType($moods, TagType::MOOD->value);
+        return $this;
+    }
+
+    /**
+     * Get all genre tags
+     */
+    public function getGenres(): Collection
+    {
+        return $this->tagsWithType(TagType::GENRE->value);
+    }
+
+    /**
+     * Check if artist has specific genre
+     */
+    public function hasGenre(string $genre): bool
+    {
+        return $this->hasTag($genre, TagType::GENRE->value);
+    }
+}
+```
+
+### Track Tagging with Inheritance
+
+```php
+<?php
+
+namespace App\Models;
+
+use App\Enums\TagType;
+use Illuminate\Database\Eloquent\Model;
+use Spatie\Tags\HasTags;
+
+class Track extends Model
+{
+    use HasTags;
+
+    /**
+     * Inherit tags from album and artist
+     */
+    public function inheritTags(): self
+    {
+        // Inherit genre tags from artist
+        if ($this->album && $this->album->artist) {
+            $artistGenres = $this->album->artist->tagsWithType(TagType::GENRE->value);
+            foreach ($artistGenres as $tag) {
+                $this->attachTag($tag);
+            }
+        }
+
+        // Inherit album-specific tags
+        if ($this->album) {
+            $albumTags = $this->album->tags;
+            foreach ($albumTags as $tag) {
+                $this->attachTag($tag);
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * Set track-specific mood tags
+     */
+    public function setTrackMoods(array $moods): self
+    {
+        $this->syncTagsWithType($moods, TagType::MOOD->value);
+        return $this;
+    }
+}
+```
+
+## Performance Optimization
+
+### Eager Loading Tags
+
+```php
+// Efficient tag loading
+$artists = Artist::with('tags')->get();
+
+// Load specific tag types
+$artists = Artist::with(['tags' => function ($query) {
+    $query->where('type', 'genre');
+}])->get();
+
+// Load tags with counts
+$popularTags = Tag::withCount('taggables')
+    ->orderBy('taggables_count', 'desc')
+    ->get();
+```
+
+### Caching Strategies
+
+```php
+<?php
+
+namespace App\Services;
+
+use Illuminate\Support\Facades\Cache;
+use Spatie\Tags\Tag;
+
+class TagCacheService
+{
+    /**
+     * Cache popular tags by type
+     */
+    public function getPopularTags(string $type, int $limit = 20): Collection
+    {
+        $cacheKey = "popular_tags_{$type}_{$limit}";
+        
+        return Cache::remember($cacheKey, 3600, function () use ($type, $limit) {
+            return Tag::where('type', $type)
+                ->withCount('taggables')
+                ->orderBy('taggables_count', 'desc')
+                ->limit($limit)
+                ->get();
+        });
+    }
+
+    /**
+     * Clear tag caches
+     */
+    public function clearTagCaches(): void
+    {
+        $types = ['genre', 'mood', 'era', 'language'];
+        
+        foreach ($types as $type) {
+            Cache::forget("popular_tags_{$type}_20");
+            Cache::forget("tag_cloud_{$type}");
+        }
+    }
+}
+```
+
+## API Integration
+
+### Tag API Endpoints
+
+```php
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Http\Resources\TagResource;
+use App\Services\TagManagementService;
+use Illuminate\Http\Request;
+use Spatie\Tags\Tag;
+
+class TagController extends Controller
+{
+    public function __construct(
+        private TagManagementService $tagService
+    ) {}
+
+    /**
+     * Get tags by type
+     */
+    public function index(Request $request)
+    {
+        $type = $request->get('type');
+        $limit = $request->get('limit', 50);
+
+        $query = Tag::query();
+
+        if ($type) {
+            $query->where('type', $type);
+        }
+
+        $tags = $query->withCount('taggables')
+            ->orderBy('taggables_count', 'desc')
+            ->limit($limit)
+            ->get();
+
+        return TagResource::collection($tags);
+    }
+
+    /**
+     * Get popular tags
+     */
+    public function popular(Request $request)
+    {
+        $type = $request->get('type', 'genre');
+        $limit = $request->get('limit', 10);
+
+        $tags = $this->tagService->getPopularTagsByType($type, $limit);
+
+        return TagResource::collection($tags);
+    }
+}
+```
+
+### Tag Resource
+
+```php
+<?php
+
+namespace App\Http\Resources;
+
+use Illuminate\Http\Resources\Json\JsonResource;
+
+class TagResource extends JsonResource
+{
+    public function toArray($request): array
+    {
+        return [
+            'id' => $this->id,
+            'name' => $this->name,
+            'slug' => $this->slug,
+            'type' => $this->type,
+            'usage_count' => $this->whenLoaded('taggables_count'),
+            'created_at' => $this->created_at?->toISOString(),
+            'updated_at' => $this->updated_at?->toISOString(),
+        ];
+    }
+}
+```
+
+## Testing Strategies
+
+### Unit Tests
+
+```php
+<?php
+
+use App\Models\Artist;
+use App\Enums\TagType;
+use Spatie\Tags\Tag;
+
+describe('Artist Tagging', function () {
+    it('can attach genre tags to artist', function () {
+        $artist = Artist::factory()->create();
+        
+        $artist->attachTags(['rock', 'alternative'], TagType::GENRE->value);
+        
+        expect($artist->tags)->toHaveCount(2);
+        expect($artist->hasTag('rock', TagType::GENRE->value))->toBeTrue();
+    });
+
+    it('can sync tags with type validation', function () {
+        $artist = Artist::factory()->create();
+        
+        $artist->setGenres(['rock', 'pop']);
+        $artist->setMoods(['energetic', 'upbeat']);
+        
+        expect($artist->getGenres())->toHaveCount(2);
+        expect($artist->tagsWithType(TagType::MOOD->value))->toHaveCount(2);
+    });
+
+    it('inherits tags from artist to tracks', function () {
+        $artist = Artist::factory()->create();
+        $album = Album::factory()->for($artist)->create();
+        $track = Track::factory()->for($album)->create();
+        
+        $artist->setGenres(['rock']);
+        $track->inheritTags();
+        
+        expect($track->hasTag('rock', TagType::GENRE->value))->toBeTrue();
+    });
+});
+```
+
+## Production Deployment
+
+### Database Optimization
+
+```sql
+-- Add indexes for better performance
+CREATE INDEX idx_tags_type ON tags(type);
+CREATE INDEX idx_tags_name_type ON tags(name, type);
+CREATE INDEX idx_taggables_tag_id ON taggables(tag_id);
+CREATE INDEX idx_taggables_taggable ON taggables(taggable_type, taggable_id);
+```
+
+### Monitoring and Maintenance
+
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use App\Services\TagManagementService;
+use Illuminate\Console\Command;
+
+class CleanUnusedTags extends Command
+{
+    protected $signature = 'tags:clean';
+    protected $description = 'Remove unused tags from the system';
+
+    public function handle(TagManagementService $tagService): int
+    {
+        $count = $tagService->cleanUnusedTags();
+        
+        $this->info("Cleaned {$count} unused tags.");
+        
+        return 0;
+    }
+}
+```
+
+## Best Practices
+
+### Tag Naming Conventions
+
+- Use lowercase, hyphenated names: `indie-rock`, `high-energy`
+- Keep names concise but descriptive
+- Avoid special characters except hyphens
+- Use consistent terminology across tag types
+
+### Performance Guidelines
+
+- Always eager load tags when displaying lists
+- Cache popular tags and tag clouds
+- Use database indexes on tag queries
+- Implement tag cleanup routines
+- Monitor tag usage patterns
+
+### Security Considerations
+
+- Validate tag types against allowed enums
+- Sanitize tag names before storage
+- Implement rate limiting on tag creation
+- Audit tag modifications for compliance
+
+---
+
+**Navigation**: [Previous: Laravel Sanctum Guide](080-laravel-sanctum-guide.md) | **Next**: [Spatie Media Library Guide](100-spatie-media-library-guide.md)
+
+**Related Documentation**:
+- [Chinook Models Guide](../010-chinook-models-guide.md) - Model implementations with tags
+- [Package Testing Guide](testing/010-pest-testing-guide.md) - Testing tag functionality
+- [Packages Index](000-packages-index.md) - All package guides
+
+---
+
+*This guide provides enterprise-grade Spatie Tags implementation for the Chinook music database with Laravel 12 modern patterns and WCAG 2.1 AA accessibility compliance.*

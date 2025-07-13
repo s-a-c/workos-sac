@@ -1,0 +1,823 @@
+# Database Optimization Guide
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Index Strategy](#index-strategy)
+- [Query Optimization](#query-optimization)
+- [Connection Management](#connection-management)
+- [Partitioning Strategies](#partitioning-strategies)
+- [Backup & Recovery](#backup--recovery)
+- [Monitoring & Maintenance](#monitoring--maintenance)
+- [Performance Tuning](#performance-tuning)
+- [Navigation](#navigation)
+
+## Overview
+
+This guide provides comprehensive database optimization strategies for the Chinook music database system. These
+optimizations focus on improving query performance, reducing resource usage, and ensuring scalable database operations
+for production Filament applications.
+
+**Optimization Goals:**
+
+- **Query Response Time**: < 50ms for simple queries, < 200ms for complex queries
+- **Concurrent Connections**: Support 100+ simultaneous users
+- **Storage Efficiency**: Minimize storage overhead while maintaining performance
+- **Backup Performance**: Complete backups in < 30 minutes
+
+## Index Strategy
+
+### Primary Indexes
+
+Create essential indexes for core Chinook tables:
+
+```sql
+-- Artists table indexes
+CREATE INDEX idx_artists_name ON artists(name);
+CREATE INDEX idx_artists_created_at ON artists(created_at);
+CREATE FULLTEXT INDEX ft_artists_name ON artists(name);
+
+-- Albums table indexes
+CREATE INDEX idx_albums_artist_id ON albums(artist_id);
+CREATE INDEX idx_albums_release_date ON albums(release_date);
+CREATE INDEX idx_albums_title_artist ON albums(title, artist_id);
+CREATE FULLTEXT INDEX ft_albums_title ON albums(title);
+
+-- Tracks table indexes
+CREATE INDEX idx_tracks_album_id ON tracks(album_id);
+CREATE INDEX idx_tracks_media_type_id ON tracks(media_type_id);
+CREATE INDEX idx_tracks_unit_price ON tracks(unit_price);
+CREATE INDEX idx_tracks_milliseconds ON tracks(milliseconds);
+CREATE INDEX idx_tracks_name_album ON tracks(name, album_id);
+CREATE INDEX idx_tracks_search ON tracks(name, album_id, unit_price);
+CREATE FULLTEXT INDEX ft_tracks_name ON tracks(name);
+
+-- Taxonomy Terms table indexes
+CREATE INDEX idx_categories_type ON categories(type);
+CREATE INDEX idx_categories_parent_id ON categories(parent_id);
+CREATE INDEX idx_categories_type_active ON categories(type, is_active);
+CREATE INDEX idx_categories_parent_sort ON categories(parent_id, sort_order);
+
+-- Categorizables table indexes
+CREATE INDEX idx_categorizables_category_id ON categorizables(category_id);
+CREATE INDEX idx_categorizables_categorizable ON categorizables(categorizable_type, categorizable_id);
+CREATE UNIQUE INDEX idx_categorizables_unique ON categorizables(category_id, categorizable_type, categorizable_id);
+
+-- Customers table indexes
+CREATE INDEX idx_customers_email ON customers(email);
+CREATE INDEX idx_customers_support_rep ON customers(support_rep_id);
+CREATE INDEX idx_customers_country_city ON customers(country, city);
+
+-- Invoices table indexes
+CREATE INDEX idx_invoices_customer_id ON invoices(customer_id);
+CREATE INDEX idx_invoices_date ON invoices(invoice_date);
+CREATE INDEX idx_invoices_status ON invoices(status);
+CREATE INDEX idx_invoices_customer_date ON invoices(customer_id, invoice_date);
+CREATE INDEX idx_invoices_date_status ON invoices(invoice_date, status);
+
+-- Invoice Lines table indexes
+CREATE INDEX idx_invoice_lines_invoice_id ON invoice_lines(invoice_id);
+CREATE INDEX idx_invoice_lines_track_id ON invoice_lines(track_id);
+
+-- Playlists table indexes
+CREATE INDEX idx_playlists_public ON playlists(is_public);
+CREATE INDEX idx_playlists_created_at ON playlists(created_at);
+CREATE FULLTEXT INDEX ft_playlists_name ON playlists(name);
+
+-- Playlist Track table indexes
+CREATE INDEX idx_playlist_track_playlist_id ON playlist_track(playlist_id);
+CREATE INDEX idx_playlist_track_track_id ON playlist_track(track_id);
+CREATE INDEX idx_playlist_track_sort ON playlist_track(playlist_id, sort_order);
+```
+
+### Composite Indexes for Filament
+
+Optimize indexes for common Filament operations:
+
+```sql
+-- Filament resource listing indexes
+CREATE INDEX idx_tracks_filament_list ON tracks(created_at DESC, id);
+CREATE INDEX idx_albums_filament_list ON albums(created_at DESC, id);
+CREATE INDEX idx_artists_filament_list ON artists(created_at DESC, id);
+
+-- Filament search indexes
+CREATE INDEX idx_tracks_filament_search ON tracks(name, album_id, media_type_id, created_at);
+CREATE INDEX idx_albums_filament_search ON albums(title, artist_id, release_date, created_at);
+
+-- Filament filtering indexes
+CREATE INDEX idx_tracks_price_filter ON tracks(unit_price, media_type_id, created_at);
+CREATE INDEX idx_invoices_date_filter ON invoices(invoice_date, status, customer_id);
+CREATE INDEX idx_customers_country_filter ON customers(country, state, city);
+
+-- Soft delete indexes
+CREATE INDEX idx_tracks_not_deleted ON tracks(deleted_at) WHERE deleted_at IS NULL;
+CREATE INDEX idx_albums_not_deleted ON albums(deleted_at) WHERE deleted_at IS NULL;
+CREATE INDEX idx_artists_not_deleted ON artists(deleted_at) WHERE deleted_at IS NULL;
+```
+
+### Index Maintenance
+
+Automated index maintenance script:
+
+```sql
+-- Index maintenance procedures
+DELIMITER //
+
+CREATE PROCEDURE OptimizeIndexes()
+BEGIN
+    DECLARE done INT DEFAULT FALSE;
+    DECLARE table_name VARCHAR(255);
+    DECLARE cur CURSOR FOR 
+        SELECT TABLE_NAME 
+        FROM information_schema.TABLES 
+        WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_TYPE = 'BASE TABLE';
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+
+    OPEN cur;
+    read_loop: LOOP
+        FETCH cur INTO table_name;
+        IF done THEN
+            LEAVE read_loop;
+        END IF;
+        
+        SET @sql = CONCAT('OPTIMIZE TABLE ', table_name);
+        PREPARE stmt FROM @sql;
+        EXECUTE stmt;
+        DEALLOCATE PREPARE stmt;
+    END LOOP;
+    CLOSE cur;
+END//
+
+CREATE PROCEDURE AnalyzeIndexUsage()
+BEGIN
+    SELECT 
+        s.table_name,
+        s.index_name,
+        s.cardinality,
+        s.seq_in_index,
+        s.column_name,
+        ROUND(((s.cardinality / t.table_rows) * 100), 2) AS selectivity
+    FROM 
+        information_schema.statistics s
+    INNER JOIN 
+        information_schema.tables t ON s.table_name = t.table_name
+    WHERE 
+        s.table_schema = DATABASE()
+        AND t.table_schema = DATABASE()
+        AND s.cardinality > 0
+    ORDER BY 
+        selectivity DESC;
+END//
+
+DELIMITER ;
+```
+
+## Query Optimization
+
+### Optimized Eloquent Queries
+
+Implement efficient queries for Filament resources:
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
+
+class Track extends Model
+{
+    // Optimized scopes for common queries
+    public function scopeWithAlbumAndArtist(Builder $query): Builder
+    {
+        return $query->select([
+                'tracks.id',
+                'tracks.name',
+                'tracks.unit_price',
+                'tracks.milliseconds',
+                'tracks.album_id',
+                'albums.title as album_title',
+                'artists.name as artist_name'
+            ])
+            ->join('albums', 'tracks.album_id', '=', 'albums.id')
+            ->join('artists', 'albums.artist_id', '=', 'artists.id');
+    }
+
+    public function scopePopular(Builder $query, int $limit = 10): Builder
+    {
+        return $query->select([
+                'tracks.*',
+                'COUNT(invoice_lines.id) as purchase_count'
+            ])
+            ->leftJoin('invoice_lines', 'tracks.id', '=', 'invoice_lines.track_id')
+            ->groupBy('tracks.id')
+            ->orderBy('purchase_count', 'desc')
+            ->limit($limit);
+    }
+
+    public function scopeByGenre(Builder $query, string $genre): Builder
+    {
+        return $query->whereHas('categories', function (Builder $query) use ($genre) {
+            $query->where('type', 'GENRE')
+                  ->where('slug', $genre);
+        });
+    }
+
+    public function scopeRecentlyAdded(Builder $query, int $days = 30): Builder
+    {
+        return $query->where('created_at', '>=', now()->subDays($days))
+                    ->orderBy('created_at', 'desc');
+    }
+}
+```
+
+### Raw Query Optimization
+
+Use raw queries for complex operations:
+
+```php
+<?php
+
+namespace App\Services;
+
+use Illuminate\Support\Facades\DB;
+
+class AnalyticsService
+{
+    public function getTopSellingTracks(int $limit = 10): array
+    {
+        return DB::select("
+            SELECT 
+                t.id,
+                t.name,
+                a.title as album_title,
+                ar.name as artist_name,
+                COUNT(il.id) as sales_count,
+                SUM(il.total) as total_revenue
+            FROM tracks t
+            INNER JOIN albums a ON t.album_id = a.id
+            INNER JOIN artists ar ON a.artist_id = ar.id
+            INNER JOIN invoice_lines il ON t.id = il.track_id
+            INNER JOIN invoices i ON il.invoice_id = i.id
+            WHERE i.status = 'paid'
+            GROUP BY t.id, t.name, a.title, ar.name
+            ORDER BY sales_count DESC, total_revenue DESC
+            LIMIT ?
+        ", [$limit]);
+    }
+
+    public function getRevenueByMonth(int $year): array
+    {
+        return DB::select("
+            SELECT 
+                MONTH(i.invoice_date) as month,
+                MONTHNAME(i.invoice_date) as month_name,
+                COUNT(DISTINCT i.id) as invoice_count,
+                COUNT(il.id) as items_sold,
+                SUM(i.total) as total_revenue
+            FROM invoices i
+            INNER JOIN invoice_lines il ON i.id = il.invoice_id
+            WHERE YEAR(i.invoice_date) = ?
+            AND i.status = 'paid'
+            GROUP BY MONTH(i.invoice_date), MONTHNAME(i.invoice_date)
+            ORDER BY month
+        ", [$year]);
+    }
+
+    public function getCustomerLifetimeValue(): array
+    {
+        return DB::select("
+            SELECT 
+                c.id,
+                CONCAT(c.first_name, ' ', c.last_name) as customer_name,
+                c.email,
+                COUNT(DISTINCT i.id) as total_orders,
+                COUNT(il.id) as total_items,
+                SUM(i.total) as lifetime_value,
+                AVG(i.total) as average_order_value,
+                MIN(i.invoice_date) as first_purchase,
+                MAX(i.invoice_date) as last_purchase
+            FROM customers c
+            INNER JOIN invoices i ON c.id = i.customer_id
+            INNER JOIN invoice_lines il ON i.id = il.invoice_id
+            WHERE i.status = 'paid'
+            GROUP BY c.id, c.first_name, c.last_name, c.email
+            HAVING lifetime_value > 0
+            ORDER BY lifetime_value DESC
+        ");
+    }
+}
+```
+
+## Connection Management
+
+### Database Configuration
+
+Optimize database connections:
+
+```php
+// config/database.php
+'mysql' => [
+    'driver' => 'mysql',
+    'host' => env('DB_HOST', '127.0.0.1'),
+    'port' => env('DB_PORT', '3306'),
+    'database' => env('DB_DATABASE', 'forge'),
+    'username' => env('DB_USERNAME', 'forge'),
+    'password' => env('DB_PASSWORD', ''),
+    'charset' => 'utf8mb4',
+    'collation' => 'utf8mb4_unicode_ci',
+    'prefix' => '',
+    'prefix_indexes' => true,
+    'strict' => true,
+    'engine' => null,
+    'options' => extension_loaded('pdo_mysql') ? array_filter([
+        PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+        PDO::ATTR_PERSISTENT => true,
+        PDO::ATTR_TIMEOUT => 30,
+        PDO::MYSQL_ATTR_USE_BUFFERED_QUERY => true,
+        PDO::MYSQL_ATTR_INIT_COMMAND => "SET sql_mode='STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION'",
+    ]) : [],
+    
+    // Connection pooling
+    'pool' => [
+        'min_connections' => 1,
+        'max_connections' => 10,
+        'connect_timeout' => 10.0,
+        'wait_timeout' => 3.0,
+        'heartbeat' => -1,
+        'max_idle_time' => 60.0,
+    ],
+    
+    // Read/Write splitting
+    'read' => [
+        'host' => [
+            env('DB_READ_HOST_1', '127.0.0.1'),
+            env('DB_READ_HOST_2', '127.0.0.1'),
+        ],
+    ],
+    'write' => [
+        'host' => [
+            env('DB_WRITE_HOST', '127.0.0.1'),
+        ],
+    ],
+    
+    'sticky' => true,
+],
+```
+
+### Connection Monitoring
+
+Monitor database connections:
+
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
+
+class MonitorDatabaseConnections extends Command
+{
+    protected $signature = 'db:monitor-connections';
+    protected $description = 'Monitor database connection usage';
+
+    public function handle()
+    {
+        $connections = DB::select("SHOW PROCESSLIST");
+        
+        $this->table(
+            ['Id', 'User', 'Host', 'Database', 'Command', 'Time', 'State'],
+            collect($connections)->map(function ($connection) {
+                return [
+                    $connection->Id,
+                    $connection->User,
+                    $connection->Host,
+                    $connection->db,
+                    $connection->Command,
+                    $connection->Time,
+                    $connection->State ?? 'N/A',
+                ];
+            })->toArray()
+        );
+
+        $activeConnections = collect($connections)->where('Command', '!=', 'Sleep')->count();
+        $totalConnections = count($connections);
+        
+        $this->info("Active connections: {$activeConnections}");
+        $this->info("Total connections: {$totalConnections}");
+        
+        if ($activeConnections > 50) {
+            $this->warn("High number of active connections detected!");
+        }
+    }
+}
+```
+
+## Partitioning Strategies
+
+### Table Partitioning
+
+Implement partitioning for large tables:
+
+```sql
+-- Partition invoices table by year
+ALTER TABLE invoices 
+PARTITION BY RANGE (YEAR(invoice_date)) (
+    PARTITION p2020 VALUES LESS THAN (2021),
+    PARTITION p2021 VALUES LESS THAN (2022),
+    PARTITION p2022 VALUES LESS THAN (2023),
+    PARTITION p2023 VALUES LESS THAN (2024),
+    PARTITION p2024 VALUES LESS THAN (2025),
+    PARTITION p_future VALUES LESS THAN MAXVALUE
+);
+
+-- Partition invoice_lines by invoice_date (inherited from invoices)
+ALTER TABLE invoice_lines 
+PARTITION BY RANGE (YEAR(created_at)) (
+    PARTITION p2020 VALUES LESS THAN (2021),
+    PARTITION p2021 VALUES LESS THAN (2022),
+    PARTITION p2022 VALUES LESS THAN (2023),
+    PARTITION p2023 VALUES LESS THAN (2024),
+    PARTITION p2024 VALUES LESS THAN (2025),
+    PARTITION p_future VALUES LESS THAN MAXVALUE
+);
+
+-- Create procedure to add new partitions automatically
+DELIMITER //
+CREATE PROCEDURE AddYearlyPartition(IN table_name VARCHAR(64), IN partition_year INT)
+BEGIN
+    SET @sql = CONCAT(
+        'ALTER TABLE ', table_name, 
+        ' ADD PARTITION (PARTITION p', partition_year, 
+        ' VALUES LESS THAN (', partition_year + 1, '))'
+    );
+    PREPARE stmt FROM @sql;
+    EXECUTE stmt;
+    DEALLOCATE PREPARE stmt;
+END//
+DELIMITER ;
+```
+
+### Archive Strategy
+
+Implement data archiving:
+
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
+use Carbon\Carbon;
+
+class ArchiveOldData extends Command
+{
+    protected $signature = 'db:archive {--years=2 : Archive data older than specified years}';
+    protected $description = 'Archive old invoice and related data';
+
+    public function handle()
+    {
+        $years = $this->option('years');
+        $cutoffDate = Carbon::now()->subYears($years);
+        
+        $this->info("Archiving data older than {$cutoffDate->format('Y-m-d')}");
+        
+        DB::transaction(function () use ($cutoffDate) {
+            // Create archive tables if they don't exist
+            $this->createArchiveTables();
+            
+            // Archive old invoices
+            $archivedInvoices = $this->archiveInvoices($cutoffDate);
+            $this->info("Archived {$archivedInvoices} invoices");
+            
+            // Archive related invoice lines
+            $archivedLines = $this->archiveInvoiceLines($cutoffDate);
+            $this->info("Archived {$archivedLines} invoice lines");
+            
+            // Clean up archived data from main tables
+            $this->cleanupArchivedData($cutoffDate);
+        });
+        
+        $this->info('Archive process completed successfully');
+    }
+
+    private function createArchiveTables()
+    {
+        DB::statement("
+            CREATE TABLE IF NOT EXISTS invoices_archive LIKE invoices
+        ");
+        
+        DB::statement("
+            CREATE TABLE IF NOT EXISTS invoice_lines_archive LIKE invoice_lines
+        ");
+    }
+
+    private function archiveInvoices(Carbon $cutoffDate): int
+    {
+        return DB::statement("
+            INSERT INTO invoices_archive 
+            SELECT * FROM invoices 
+            WHERE invoice_date < ? 
+            AND status IN ('paid', 'cancelled')
+        ", [$cutoffDate]);
+    }
+
+    private function archiveInvoiceLines(Carbon $cutoffDate): int
+    {
+        return DB::statement("
+            INSERT INTO invoice_lines_archive 
+            SELECT il.* FROM invoice_lines il
+            INNER JOIN invoices i ON il.invoice_id = i.id
+            WHERE i.invoice_date < ?
+            AND i.status IN ('paid', 'cancelled')
+        ", [$cutoffDate]);
+    }
+
+    private function cleanupArchivedData(Carbon $cutoffDate)
+    {
+        DB::statement("
+            DELETE il FROM invoice_lines il
+            INNER JOIN invoices i ON il.invoice_id = i.id
+            WHERE i.invoice_date < ?
+            AND i.status IN ('paid', 'cancelled')
+        ", [$cutoffDate]);
+        
+        DB::statement("
+            DELETE FROM invoices 
+            WHERE invoice_date < ? 
+            AND status IN ('paid', 'cancelled')
+        ", [$cutoffDate]);
+    }
+}
+```
+
+## Backup & Recovery
+
+### Automated Backup Strategy
+
+```bash
+#!/bin/bash
+# backup-database.sh
+
+# Configuration
+DB_NAME="chinook_production"
+DB_USER="backup_user"
+DB_PASSWORD="secure_password"
+BACKUP_DIR="/var/backups/mysql"
+RETENTION_DAYS=30
+
+# Create backup directory
+mkdir -p $BACKUP_DIR
+
+# Generate backup filename with timestamp
+BACKUP_FILE="$BACKUP_DIR/chinook_$(date +%Y%m%d_%H%M%S).sql.gz"
+
+# Create compressed backup
+mysqldump \
+    --user=$DB_USER \
+    --password=$DB_PASSWORD \
+    --single-transaction \
+    --routines \
+    --triggers \
+    --events \
+    --hex-blob \
+    --opt \
+    $DB_NAME | gzip > $BACKUP_FILE
+
+# Verify backup was created
+if [ -f "$BACKUP_FILE" ]; then
+    echo "Backup created successfully: $BACKUP_FILE"
+    
+    # Test backup integrity
+    gunzip -t $BACKUP_FILE
+    if [ $? -eq 0 ]; then
+        echo "Backup integrity verified"
+    else
+        echo "Backup integrity check failed!"
+        exit 1
+    fi
+else
+    echo "Backup creation failed!"
+    exit 1
+fi
+
+# Clean up old backups
+find $BACKUP_DIR -name "chinook_*.sql.gz" -mtime +$RETENTION_DAYS -delete
+
+# Upload to cloud storage (optional)
+# aws s3 cp $BACKUP_FILE s3://your-backup-bucket/mysql/
+
+echo "Backup process completed"
+```
+
+### Point-in-Time Recovery
+
+```bash
+#!/bin/bash
+# restore-database.sh
+
+BACKUP_FILE=$1
+RESTORE_TO_TIME=$2
+
+if [ -z "$BACKUP_FILE" ]; then
+    echo "Usage: $0 <backup_file> [restore_to_time]"
+    exit 1
+fi
+
+# Restore from backup
+echo "Restoring database from $BACKUP_FILE"
+gunzip -c $BACKUP_FILE | mysql -u root -p chinook_production
+
+if [ ! -z "$RESTORE_TO_TIME" ]; then
+    echo "Applying binary logs up to $RESTORE_TO_TIME"
+    mysqlbinlog --stop-datetime="$RESTORE_TO_TIME" /var/log/mysql/mysql-bin.* | mysql -u root -p chinook_production
+fi
+
+echo "Database restore completed"
+```
+
+## Monitoring & Maintenance
+
+### Performance Monitoring
+
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
+
+class DatabaseHealthCheck extends Command
+{
+    protected $signature = 'db:health-check';
+    protected $description = 'Perform database health check';
+
+    public function handle()
+    {
+        $this->info('Performing database health check...');
+        
+        // Check slow queries
+        $this->checkSlowQueries();
+        
+        // Check table sizes
+        $this->checkTableSizes();
+        
+        // Check index usage
+        $this->checkIndexUsage();
+        
+        // Check fragmentation
+        $this->checkFragmentation();
+        
+        $this->info('Health check completed');
+    }
+
+    private function checkSlowQueries()
+    {
+        $slowQueries = DB::select("
+            SELECT query_time, lock_time, rows_sent, rows_examined, sql_text
+            FROM mysql.slow_log 
+            WHERE start_time > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+            ORDER BY query_time DESC 
+            LIMIT 10
+        ");
+        
+        if (count($slowQueries) > 0) {
+            $this->warn("Found " . count($slowQueries) . " slow queries in the last hour");
+        } else {
+            $this->info("No slow queries detected");
+        }
+    }
+
+    private function checkTableSizes()
+    {
+        $tableSizes = DB::select("
+            SELECT 
+                table_name,
+                ROUND(((data_length + index_length) / 1024 / 1024), 2) AS size_mb,
+                table_rows
+            FROM information_schema.tables 
+            WHERE table_schema = DATABASE()
+            ORDER BY (data_length + index_length) DESC
+            LIMIT 10
+        ");
+        
+        $this->table(
+            ['Table', 'Size (MB)', 'Rows'],
+            collect($tableSizes)->map(function ($table) {
+                return [$table->table_name, $table->size_mb, number_format($table->table_rows)];
+            })->toArray()
+        );
+    }
+
+    private function checkIndexUsage()
+    {
+        $unusedIndexes = DB::select("
+            SELECT 
+                s.table_name,
+                s.index_name,
+                s.cardinality
+            FROM information_schema.statistics s
+            LEFT JOIN performance_schema.table_io_waits_summary_by_index_usage p 
+                ON s.table_schema = p.object_schema 
+                AND s.table_name = p.object_name 
+                AND s.index_name = p.index_name
+            WHERE s.table_schema = DATABASE()
+            AND p.index_name IS NULL
+            AND s.index_name != 'PRIMARY'
+        ");
+        
+        if (count($unusedIndexes) > 0) {
+            $this->warn("Found " . count($unusedIndexes) . " potentially unused indexes");
+        }
+    }
+
+    private function checkFragmentation()
+    {
+        $fragmented = DB::select("
+            SELECT 
+                table_name,
+                ROUND(data_free / 1024 / 1024, 2) AS fragmentation_mb
+            FROM information_schema.tables 
+            WHERE table_schema = DATABASE()
+            AND data_free > 0
+            ORDER BY data_free DESC
+        ");
+        
+        $totalFragmentation = collect($fragmented)->sum('fragmentation_mb');
+        
+        if ($totalFragmentation > 100) {
+            $this->warn("High fragmentation detected: {$totalFragmentation}MB");
+            $this->info("Consider running OPTIMIZE TABLE on fragmented tables");
+        }
+    }
+}
+```
+
+## Performance Tuning
+
+### MySQL Configuration
+
+Optimize MySQL settings:
+
+```ini
+# /etc/mysql/mysql.conf.d/mysqld.cnf
+
+[mysqld]
+# Basic settings
+max_connections = 200
+max_connect_errors = 1000000
+wait_timeout = 28800
+interactive_timeout = 28800
+
+# Buffer settings
+innodb_buffer_pool_size = 2G
+innodb_buffer_pool_instances = 8
+innodb_log_file_size = 256M
+innodb_log_buffer_size = 64M
+innodb_flush_log_at_trx_commit = 2
+
+# Query cache (if using MySQL < 8.0)
+query_cache_type = 1
+query_cache_size = 256M
+query_cache_limit = 2M
+
+# Temporary tables
+tmp_table_size = 256M
+max_heap_table_size = 256M
+
+# MyISAM settings
+key_buffer_size = 128M
+myisam_sort_buffer_size = 128M
+
+# Slow query log
+slow_query_log = 1
+slow_query_log_file = /var/log/mysql/slow.log
+long_query_time = 2
+log_queries_not_using_indexes = 1
+
+# Binary logging
+log_bin = /var/log/mysql/mysql-bin.log
+binlog_format = ROW
+expire_logs_days = 7
+max_binlog_size = 100M
+
+# Performance schema
+performance_schema = ON
+performance_schema_max_table_instances = 400
+performance_schema_max_table_handles = 4000
+```
+
+---
+
+## Navigation
+
+**← Previous:** [Performance Optimization Guide](050-performance-optimization.md)
+
+**Next →** [Asset Optimization Guide](070-asset-optimization.md)
+
+**↑ Back to:** [Deployment Index](000-deployment-index.md)

@@ -5,12 +5,10 @@ on:
     branches:
       - develop
       - main
-      - workos
   pull_request:
     branches:
       - develop
       - main
-      - workos
 
 permissions:
   contents: write
